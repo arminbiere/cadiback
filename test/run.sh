@@ -15,25 +15,43 @@ run () {
   expected=$1
   shift
   name=$1
-  cnf=$1.cnf
   shift
   log=$name.log
   err=$name.err
-  ../cadiback $cnf $* >$log 2>$err
+  pretty="./cadiback"
+  cmd="../cadiback"
+  while [ $# -gt 0 ]
+  do
+    case $1 in
+      -*) cmd="$cmd $1"; pretty="$pretty $1";;
+      *) cmd="$cmd $1"; pretty="$pretty test/$1";;
+    esac
+    shift
+  done
+  $cmd 1>$log 2>$err
   status=$?
   if [ $status = $expected ]
   then
-    echo "./cadiback test/$cnf $* # succeeded with expected exit code '$status'"
+    echo "$pretty # '$name' succeeded with expected exit code '$status'"
   else
-    echo "./cadiback test/$cnf $* # failed with exit code '$status' (expected '$expected)"
+    echo "$pretty # '$name' failed with exit code '$status' (expected '$expected)"
     exit 1
   fi
   runs=`expr $runs + 1`
 }
 
-run 10 empty
-run 10 empty -l
-run 10 empty -q
-run 10 empty -v
+run 0 usage -h
+
+run 10 empty1 empty.cnf
+run 10 empty2 empty.cnf -l
+run 10 empty3 empty.cnf -q
+run 10 empty4 empty.cnf -v
+
+run 10 example1 example.cnf
+run 10 example2 example.cnf -q
+run 10 example3 example.cnf -v
+
+run 20 false0 false0.cnf
+run 20 false1 false1.cnf
 
 echo "passed $runs test runs"

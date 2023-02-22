@@ -11,7 +11,7 @@ static const char * usage =
 "  -q       disable all messages\n"
 "  -v       increase verbosity\n"
 "\n"
-"and '<dimacs>' is a SAT instances for which the backbones literals are\n"
+"and '<dimacs>' is a SAT instances for which the backbone literals are\n"
 "determined and then printed.\n"
 
 ;
@@ -29,11 +29,13 @@ static const char * usage =
 #include "resources.hpp"
 #include "signal.hpp"
 
-static int vars, literals;
 static int verbosity;
 static const char *path;
 
-static signed char * backbones;
+static int vars;
+static int *backbone;
+static size_t backbones;
+static size_t calls;
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -47,6 +49,13 @@ static void msg (const char *fmt, ...) {
   vprintf (fmt, ap);
   va_end (ap);
   fputc ('\n', stdout);
+  fflush (stdout);
+}
+
+static void line () {
+  if (verbosity < 0)
+    return;
+  fputs ("c\n", stdout);
   fflush (stdout);
 }
 
@@ -75,6 +84,16 @@ static void dbg (const char *fmt, ...) {
 static CaDiCaL::Solver *solver;
 
 static void statistics () {
+  if (verbosity < 0)
+    return;
+  printf ("c\n");
+  printf ("c --- [ backbone statistics ] ");
+  printf ("------------------------------------------------\n");
+  printf ("c\n");
+  printf ("c called SAT solver %zu times\n", calls);
+  printf ("c found %zu backbones\n", backbones);
+  printf ("c\n");
+  fflush (stdout);
   if (!solver)
     return;
   if (verbosity > 0)
@@ -109,6 +128,7 @@ int main (int argc, char **argv) {
       path = arg;
   }
   msg ("CaDiCaL BackBone Analyzer CadiBack");
+  line ();
   solver = new CaDiCaL::Solver ();
   int res;
   {
@@ -127,11 +147,12 @@ int main (int argc, char **argv) {
       if (err)
         die ("%s", err);
       if (vars == INT_MAX)
-	die ("can not support 'INT_MAX == %d' variables", vars);
-      size = vars++;
+        die ("can not support 'INT_MAX == %d' variables", vars);
     }
     msg ("found %d variables", vars);
+    line ();
     dbg ("starting solving");
+    calls++;
     res = solver->solve ();
     assert (res == 10 || res == 20);
     if (res == 10) {
@@ -139,8 +160,47 @@ int main (int argc, char **argv) {
            CaDiCaL::absolute_process_time ());
       printf ("s SATISFIABLE\n");
       fflush (stdout);
-    } else
+      backbone = new int[vars + 1];
+      if (!backbone)
+        die ("out-of-memory allocating backbone array");
+      for (int idx = 1; idx <= vars; idx++)
+        backbone[idx] = solver->val (idx);
+      for (int idx = 1; idx <= vars; idx++) {
+        int lit = backbone[idx];
+        if (!backbone[idx]) {
+          dbg ("skipping dropped non-backbone variable %d", idx);
+          continue;
+        }
+        dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
+        solver->assume (-lit);
+        calls++;
+        int tmp = solver->solve ();
+        if (tmp == 10) {
+          dbg ("found model satisfying "
+               "negation %d of backbone candidate %d thus dropping %d",
+               -lit, lit, lit);
+          backbone[idx] = 0;
+          for (int other = idx + 1; other <= vars; other++) {
+            int candidate = backbone[other];
+            if (candidate && candidate != solver->val (other)) {
+              dbg ("model also satisfies negation %d "
+                   "of other backbone candidate %d thus dropping %d too",
+                   -candidate, candidate, candidate);
+              backbone[other] = 0;
+            }
+          }
+        } else {
+          assert (tmp == 20);
+          printf ("b %d\n", lit);
+          fflush (stdout);
+          backbones++;
+        }
+      }
+      delete[] backbone;
+    } else {
+      assert (res == 20);
       printf ("s UNSATISFIABLE\n");
+    }
     statistics ();
     dbg ("deleting solver");
     CaDiCaL::Signal::reset ();
