@@ -7,6 +7,7 @@ static const char * usage =
 "where '<option>' is one of the following\n"
 "\n"
 "  -h       print this command line option summary\n"
+"  -l       extensive logging for debugging\n"
 "  -q       disable all messages\n"
 "  -v       increase verbosity\n"
 "\n"
@@ -18,6 +19,7 @@ static const char * usage =
 // clang-format on
 
 #include <cassert>
+#include <climits>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -55,15 +57,35 @@ static void die (const char *fmt, ...) {
   exit (1);
 }
 
+static void dbg (const char * fmt, ...) {
+  if (verbosity < INT_MAX)
+    return;
+  fputs ("c LOGGING ", stdout);
+  va_list ap;
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
 static CaDiCaL::Solver *solver;
 
 int main (int argc, char **argv) {
-  msg ("CaDiCaL BackBone Analyzer CadiBack");
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h")) {
       fputs (usage, stdout);
       exit (0);
+    } else if (!strcmp (arg, "-l")) {
+      verbosity = INT_MAX;
+    } else if (!strcmp (arg, "-q")) {
+      verbosity = -1;
+    } else if (!strcmp (arg, "-v")) {
+      if (verbosity < 0)
+	verbosity = 1;
+      else if (verbosity < INT_MAX)
+	verbosity++;
     } else if (*arg == '-')
       die ("invalid option '%s' (try '-h')", arg);
     else if (path)
@@ -77,9 +99,14 @@ int main (int argc, char **argv) {
     die ("can not read '%s'", path);
   else
     close_file = 1;
+  msg ("CaDiCaL BackBone Analyzer CadiBack");
   solver = new CaDiCaL::Solver ();
+  dbg ("initialized solver");
   if (close_file)
     fclose (file);
+  int res = 0;
+  dbg ("deleting solver");
   delete solver;
-  return 0;
+  msg ("exit %d", res);
+  return res;
 }
