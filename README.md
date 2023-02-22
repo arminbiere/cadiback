@@ -11,8 +11,9 @@ before configuring and compiling it make sure to have
 - `../cadical/build/libcadical.a`
 - `../cadical/src/cadical.hpp`
 
-Then issue `./configure && make` to configure and compile it.  There
-are additional configuration options which are listed with `./configure -h`.
+Then issue `./configure && make` to configure and compile it.  To also test
+the library you also use `make test` (additionally or alternatively).  There
+are further configuration options which can be listed with `./configure -h`.
 
 Usage of the tool is as follows.  Given the following CNF in `dimacs.cnf`
 calling `cadiback` on it it will give:
