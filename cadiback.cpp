@@ -1,18 +1,22 @@
 // clang-format off
 
+#define VERSION "0.1.0"
+
 static const char * usage =
 
 "usage: cadiback [ <option> ... ] [ <dimacs> ]\n"
 "\n"
 "where '<option>' is one of the following\n"
 "\n"
-"  -h       print this command line option summary\n"
-"  -l       extensive logging for debugging\n"
-"  -q       disable all messages\n"
-"  -n       do not print backbone \n"
+"  -h          print this command line option summary\n"
+"  -l          extensive logging for debugging\n"
+"  -q          disable all messages\n"
+"  -n          do not print backbone \n"
 "\n"
-"  -v       increase verbosity\n"
-"           (SAT solver verbosity is increased with two '-v')\n"
+"  -v          increase verbosity\n"
+"              (SAT solver verbosity is increased with two '-v')\n"
+"\n"
+"  --version   print version and exit\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
 "determined and then printed (unless '-n' is specified).  If no input\n"
@@ -142,6 +146,10 @@ int main (int argc, char **argv) {
     if (!strcmp (arg, "-h")) {
       fputs (usage, stdout);
       exit (0);
+    } else if (!strcmp (arg, "--version")) {
+      fputs (VERSION, stdout);
+      fputc ('\n', stdout);
+      exit (0);
     } else if (!strcmp (arg, "-l")) {
       verbosity = INT_MAX;
     } else if (!strcmp (arg, "-n")) {
@@ -162,7 +170,7 @@ int main (int argc, char **argv) {
   }
   msg ("CaDiBack BackBone Analyzer");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
-  msg ("Version 0.1.0 CaDiCaL %s", CaDiCaL::Solver::version ());
+  msg ("Version " VERSION " CaDiCaL %s", CaDiCaL::Solver::version ());
   line ();
   solver = new CaDiCaL::Solver ();
   if (verbosity < 0)
