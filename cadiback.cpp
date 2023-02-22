@@ -177,7 +177,8 @@ int main (int argc, char **argv) {
     solver->set ("quiet", 1);
   else if (verbosity > 0) { 
     solver->set ("verbose", verbosity - 1);
-    solver->set ("report", 1);
+    if (verbosity > 1)
+      solver->set ("report", 1);
   }
   int res;
   {
