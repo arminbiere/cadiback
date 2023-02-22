@@ -206,11 +206,10 @@ int main (int argc, char **argv) {
   solver = new CaDiCaL::Solver ();
   if (verbosity < 0)
     solver->set ("quiet", 1);
-  else if (verbosity > 0) {
+  else if (verbosity > 0)
     solver->set ("verbose", verbosity - 1);
-    if (report || verbosity > 1)
-      solver->set ("report", 1);
-  }
+  if (report || verbosity > 1)
+    solver->set ("report", 1);
   int res;
   {
     CadiBackSignalHandler handler;
