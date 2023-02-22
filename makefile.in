@@ -4,6 +4,8 @@ cadiback: cadiback.o ../cadical/build/libcadical.a makefile
 	$(COMPILE) -o $@ $< -L../cadical/build -lcadical
 cadiback.o: cadiback.cpp ../cadical/src/cadical.hpp makefile
 	$(COMPILE) -c $< -I../cadical/src
+format:
+	clang-format cadiback.cpp
 clean:
 	rm -f cadiback.o cadiback makefile
-.PHONY: all clean
+.PHONY: all clean format
