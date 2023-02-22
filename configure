@@ -1,0 +1,50 @@
+#!/bin/sh
+
+debug=no
+
+usage () {
+cat <<EOF
+usage: configure [-h][-g]
+EOF
+exit 0
+}
+
+die () {
+  echo "configure: error: $*" 1>&2
+  exit 1
+}
+
+msg () {
+  echo "[configure] $*"
+}
+
+while [ $# -gt 0 ]
+do
+  case $1 in
+    -h) usage;;
+    -g) debug=yes;;
+    *) die "invalid option '%s' (try '-h')";;
+  esac
+  shift
+done
+
+if [ x"CXX" = x ]
+then
+  COMPILE="g++ -Wall"
+else
+  COMPILE="$CXX -W"
+fi
+
+if [ $debug = yes ]
+then
+  COMPILE="$COMPILE -g -ggdb3"
+else
+  COMPILE="$COMPILE -O3 -DNDEBUG"
+fi
+
+msg "Compiling with '$COMPILE'"
+
+rm -f makefile
+sed -e "s/@COMPILE@/$COMPILE/" makefile.in > makefile
+
+msg "Generated 'makefile' (run 'make' to compile)"
