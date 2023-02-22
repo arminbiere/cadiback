@@ -110,11 +110,17 @@ static void statistics () {
 }
 
 class CadiBackSignalHandler : public CaDiCaL::Handler {
-  virtual void catch_signal (int sig) {}
+  virtual void catch_signal (int sig) {
+    if (verbosity < 0)
+      return;
+    printf ("c caught signal %d\n", sig);
+    statistics ();
+  }
 };
 
 static int solve () {
   assert (solver);
+  calls++;
   int res = solver->solve ();
   if (res == 10) {
     sat_calls++;
@@ -122,7 +128,6 @@ static int solve () {
     assert (res == 20);
     unsat_calls++;
   }
-  calls++;
   return res;
 }
 
@@ -152,7 +157,9 @@ int main (int argc, char **argv) {
     else
       path = arg;
   }
-  msg ("CaDiCaL BackBone Analyzer CadiBack");
+  msg ("CaDiBack BackBone Analyzer");
+  msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
+  msg ("Version 0.1.0 CaDiCaL %s", CaDiCaL::Solver::version ());
   line ();
   solver = new CaDiCaL::Solver ();
   if (verbosity < 0)
