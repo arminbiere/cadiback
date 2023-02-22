@@ -17,6 +17,7 @@ static const char * usage =
 
 // clang-format on
 
+#include <cassert>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -26,45 +27,59 @@ static const char * usage =
 
 static int verbosity;
 static const char *path;
+static bool close_file;
 static FILE *file;
 
-static void die(const char *, ...) __attribute__((format(printf, 1, 2)));
-static void msg(const char *, ...) __attribute__((format(printf, 1, 2)));
+static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
+static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
-static void msg(const char *fmt, ...) {
-  if (verbosity < 0) return;
-  fputs("c ", stdout);
+static void msg (const char *fmt, ...) {
+  if (verbosity < 0)
+    return;
+  fputs ("c ", stdout);
   va_list ap;
-  va_start(ap, fmt);
-  vprintf(fmt, ap);
-  va_end(ap);
-  fputc('\n', stdout);
-  fflush(stdout);
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  fputc ('\n', stdout);
+  fflush (stdout);
 }
 
-static void die(const char *fmt, ...) {
-  fputs("cadiback: error: ", stderr);
+static void die (const char *fmt, ...) {
+  fputs ("cadiback: error: ", stderr);
   va_list ap;
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-  fputc('\n', stderr);
-  exit(1);
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  exit (1);
 }
 
 static CaDiCaL::Solver *solver;
 
-int main(int argc, char **argv) {
-  msg("CaDiCaL BackBone Analyzer CadiBack");
+int main (int argc, char **argv) {
+  msg ("CaDiCaL BackBone Analyzer CadiBack");
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
-    if (!strcmp(arg, "-h")) {
-      fputs(usage, stdout);
-      exit(0);
+    if (!strcmp (arg, "-h")) {
+      fputs (usage, stdout);
+      exit (0);
     } else if (*arg == '-')
-    die (invalid
+      die ("invalid option '%s' (try '-h')", arg);
+    else if (path)
+      die ("multiple file arguments '%s' and '%s'", path, arg);
+    else
+      path = arg;
   }
-  solver = new CaDiCaL::Solver();
+  if (!path)
+    path = "<stdin>", file = stdin, assert (!close_file);
+  else if (!(file = fopen (path, "r")))
+    die ("can not read '%s'", path);
+  else
+    close_file = 1;
+  solver = new CaDiCaL::Solver ();
+  if (close_file)
+    fclose (file);
   delete solver;
   return 0;
 }
