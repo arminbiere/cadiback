@@ -26,8 +26,13 @@ p cnf 3 4
 -2 -3 0
 $ cadiback -q dimacs.cnf
 s SATISFIABLE
-b 1 3 0
+b 1
+b 3
+b 0
 ```
 
-which shows that literals `1` and `-3` are backbones and that there
-models both with `2` and `-2`.
+This example shows that exactly the two literals `1` and `-3` are backbones
+and that there models both with `2` and `-2`, i.e., the variable `2` is not
+a backbone variable.  In general the tool produces multiple `b` lines which
+in principle can be interleaved with comment lines starting with `c`.  The
+list of backbones ends with `b 0`.
