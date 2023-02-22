@@ -54,4 +54,6 @@ run 10 example3 example.cnf -v
 run 20 false0 false0.cnf
 run 20 false1 false1.cnf
 
+run 10 battleship battleship.cnf
+
 echo "passed $runs test runs"
