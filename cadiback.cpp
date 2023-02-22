@@ -2,7 +2,7 @@
 
 static const char * usage =
 
-"usage: cadiback [ <option> ] [ <dimacs> ]\n"
+"usage: cadiback [ <option> ... ] [ <dimacs> ]\n"
 "\n"
 "where '<option>' is one of the following\n"
 "\n"
@@ -10,10 +10,13 @@ static const char * usage =
 "  -l       extensive logging for debugging\n"
 "  -q       disable all messages\n"
 "  -n       do not print backbone \n"
+"\n"
 "  -v       increase verbosity\n"
+"           (SAT solver verbosity is increased with two '-v')\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
-"determined and then printed.\n"
+"determined and then printed (unless '-n' is specified).  If no input\n"
+"file is given the formula is read from '<stdin>'.\n"
 
 ;
 
@@ -164,8 +167,10 @@ int main (int argc, char **argv) {
   solver = new CaDiCaL::Solver ();
   if (verbosity < 0)
     solver->set ("quiet", 1);
-  else if (verbosity > 0)
-    solver->set ("verbose", verbosity);
+  else if (verbosity > 0) { 
+    solver->set ("verbose", verbosity - 1);
+    solver->set ("report", 1);
+  }
   int res;
   {
     CadiBackSignalHandler handler;
