@@ -28,7 +28,7 @@ do
   shift
 done
 
-if [ x"CXX" = x ]
+if [ x"$CXX" = x ]
 then
   COMPILE="g++ -Wall"
 else
