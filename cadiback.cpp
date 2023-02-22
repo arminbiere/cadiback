@@ -9,6 +9,7 @@ static const char * usage =
 "  -h       print this command line option summary\n"
 "  -l       extensive logging for debugging\n"
 "  -q       disable all messages\n"
+"  -n       do not print backbone \n"
 "  -v       increase verbosity\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
@@ -29,13 +30,19 @@ static const char * usage =
 #include "resources.hpp"
 #include "signal.hpp"
 
-static int verbosity;
-static const char *path;
+// Verbosity level: -1=quiet, 0=default, 1=verbose, INT_MAX=logging.
 
-static int vars;
-static int *backbone;
-static size_t backbones;
-static size_t calls;
+static int verbosity;
+
+// Print backbones by default. Otherwise only produce statistics.
+
+static int vars;      // The number of variables in the CNF.
+static int *backbone; // The backbone candidates (if non-zero).
+
+static size_t backbones;   // Number of backbones found.
+static size_t sat_calls;   // Calls with result SAT to SAT solver.
+static size_t unsat_calls; // Calls with result UNSAT to SAT solver.
+static size_t calls;       // Calls to SAT solver.
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -90,7 +97,8 @@ static void statistics () {
   printf ("c --- [ backbone statistics ] ");
   printf ("------------------------------------------------\n");
   printf ("c\n");
-  printf ("c called SAT solver %zu times\n", calls);
+  printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
+          sat_calls, unsat_calls);
   printf ("c found %zu backbones\n", backbones);
   printf ("c\n");
   fflush (stdout);
@@ -105,7 +113,22 @@ class CadiBackSignalHandler : public CaDiCaL::Handler {
   virtual void catch_signal (int sig) {}
 };
 
+static int solve () {
+  assert (solver);
+  int res = solver->solve ();
+  if (res == 10) {
+    sat_calls++;
+  } else {
+    assert (res == 20);
+    unsat_calls++;
+  }
+  calls++;
+  return res;
+}
+
 int main (int argc, char **argv) {
+  bool print = true;
+  const char *path = 0;
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h")) {
@@ -113,6 +136,8 @@ int main (int argc, char **argv) {
       exit (0);
     } else if (!strcmp (arg, "-l")) {
       verbosity = INT_MAX;
+    } else if (!strcmp (arg, "-n")) {
+      print = false;
     } else if (!strcmp (arg, "-q")) {
       verbosity = -1;
     } else if (!strcmp (arg, "-v")) {
@@ -130,6 +155,10 @@ int main (int argc, char **argv) {
   msg ("CaDiCaL BackBone Analyzer CadiBack");
   line ();
   solver = new CaDiCaL::Solver ();
+  if (verbosity < 0)
+    solver->set ("quiet", 1);
+  else if (verbosity > 0)
+    solver->set ("verbose", verbosity);
   int res;
   {
     CadiBackSignalHandler handler;
@@ -152,8 +181,7 @@ int main (int argc, char **argv) {
     msg ("found %d variables", vars);
     line ();
     dbg ("starting solving");
-    calls++;
-    res = solver->solve ();
+    res = solve ();
     assert (res == 10 || res == 20);
     if (res == 10) {
       msg ("solver determined first model after %.2f second",
@@ -173,8 +201,7 @@ int main (int argc, char **argv) {
         }
         dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
         solver->assume (-lit);
-        calls++;
-        int tmp = solver->solve ();
+        int tmp = solve ();
         if (tmp == 10) {
           dbg ("found model satisfying "
                "negation %d of backbone candidate %d thus dropping %d",
@@ -191,10 +218,17 @@ int main (int argc, char **argv) {
           }
         } else {
           assert (tmp == 20);
-          printf ("b %d\n", lit);
-          fflush (stdout);
+	  dbg ("no model with %d thus found backbone literal %d", -lit, lit);
+          if (print) {
+            printf ("b %d\n", lit);
+            fflush (stdout);
+          }
           backbones++;
         }
+      }
+      if (print) {
+        printf ("b 0\n");
+        fflush (stdout);
       }
       delete[] backbone;
     } else {
@@ -206,6 +240,7 @@ int main (int argc, char **argv) {
     CaDiCaL::Signal::reset ();
   }
   delete solver;
+  line ();
   msg ("exit %d", res);
   return res;
 }
