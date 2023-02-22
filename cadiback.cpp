@@ -11,6 +11,7 @@ static const char * usage =
 "  -h          print this command line option summary\n"
 "  -l          extensive logging for debugging\n"
 "  -q          disable all messages\n"
+"  -r          report what the solver is doing\n"
 "  -n          do not print backbone \n"
 "\n"
 "  -v          increase verbosity\n"
@@ -167,6 +168,7 @@ static int solve () {
 
 int main (int argc, char **argv) {
   bool print = true;
+  bool report = false;
   const char *path = 0;
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
@@ -183,6 +185,8 @@ int main (int argc, char **argv) {
       print = false;
     } else if (!strcmp (arg, "-q")) {
       verbosity = -1;
+    } else if (!strcmp (arg, "-r")) {
+      report = true;
     } else if (!strcmp (arg, "-v")) {
       if (verbosity < 0)
         verbosity = 1;
@@ -204,7 +208,7 @@ int main (int argc, char **argv) {
     solver->set ("quiet", 1);
   else if (verbosity > 0) {
     solver->set ("verbose", verbosity - 1);
-    if (verbosity > 1)
+    if (report || verbosity > 1)
       solver->set ("report", 1);
   }
   int res;
