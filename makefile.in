@@ -6,6 +6,8 @@ cadiback.o: cadiback.cpp ../cadical/src/cadical.hpp makefile
 	$(COMPILE) -c $< -I../cadical/src
 format:
 	clang-format cadiback.cpp
+test: all
+	./test/run.sh
 clean:
-	rm -f cadiback.o cadiback makefile
-.PHONY: all clean format
+	rm -f cadiback.o cadiback makefile test/*log test/*err
+.PHONY: all clean format test
