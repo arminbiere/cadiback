@@ -26,11 +26,12 @@ static const char * usage =
 #include <cstring>
 
 #include "cadical.hpp"
+#include "resources.hpp"
+#include "signal.hpp"
 
+static int vars;
 static int verbosity;
 static const char *path;
-static bool close_file;
-static FILE *file;
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -57,7 +58,7 @@ static void die (const char *fmt, ...) {
   exit (1);
 }
 
-static void dbg (const char * fmt, ...) {
+static void dbg (const char *fmt, ...) {
   if (verbosity < INT_MAX)
     return;
   fputs ("c LOGGING ", stdout);
@@ -71,6 +72,18 @@ static void dbg (const char * fmt, ...) {
 
 static CaDiCaL::Solver *solver;
 
+static void statistics () {
+  if (!solver)
+    return;
+  if (verbosity > 0)
+    solver->statistics ();
+  solver->resources ();
+}
+
+class CadiBackSignalHandler : public CaDiCaL::Handler {
+  virtual void catch_signal (int sig) {}
+};
+
 int main (int argc, char **argv) {
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
@@ -83,9 +96,9 @@ int main (int argc, char **argv) {
       verbosity = -1;
     } else if (!strcmp (arg, "-v")) {
       if (verbosity < 0)
-	verbosity = 1;
+        verbosity = 1;
       else if (verbosity < INT_MAX)
-	verbosity++;
+        verbosity++;
     } else if (*arg == '-')
       die ("invalid option '%s' (try '-h')", arg);
     else if (path)
@@ -93,19 +106,40 @@ int main (int argc, char **argv) {
     else
       path = arg;
   }
-  if (!path)
-    path = "<stdin>", file = stdin, assert (!close_file);
-  else if (!(file = fopen (path, "r")))
-    die ("can not read '%s'", path);
-  else
-    close_file = 1;
   msg ("CaDiCaL BackBone Analyzer CadiBack");
   solver = new CaDiCaL::Solver ();
-  dbg ("initialized solver");
-  if (close_file)
-    fclose (file);
-  int res = 0;
-  dbg ("deleting solver");
+  int res;
+  {
+    CadiBackSignalHandler handler;
+    CaDiCaL::Signal::set (&handler);
+    dbg ("initialized solver");
+    {
+      const char *err;
+      if (path) {
+        msg ("reading from '%s'", path);
+        err = solver->read_dimacs (path, vars);
+      } else {
+        msg ("reading from '<stdin>");
+        err = solver->read_dimacs (stdin, "<stdin>", vars);
+      }
+      if (err)
+        die ("%s", err);
+    }
+    msg ("found %d variables", vars);
+    dbg ("starting solving");
+    res = solver->solve ();
+    assert (res == 10 || res == 20);
+    if (res == 10) {
+      msg ("solver determined first model after %.2f second",
+           CaDiCaL::absolute_process_time ());
+      printf ("s SATISFIABLE\n");
+      fflush (stdout);
+    } else
+      printf ("s UNSATISFIABLE\n");
+    statistics ();
+    dbg ("deleting solver");
+    CaDiCaL::Signal::reset ();
+  }
   delete solver;
   msg ("exit %d", res);
   return res;
