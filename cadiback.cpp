@@ -1,6 +1,6 @@
 // clang-format off
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 
 static const char * usage =
 
@@ -51,6 +51,8 @@ static size_t sat_calls;   // Calls with result SAT to SAT solver.
 static size_t unsat_calls; // Calls with result UNSAT to SAT solver.
 static size_t calls;       // Calls to SAT solver.
 
+static double first_time, sat_time, unsat_time, solving_time;
+
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
@@ -97,6 +99,9 @@ static void dbg (const char *fmt, ...) {
 
 static CaDiCaL::Solver *solver;
 
+static double average (double a, double b) { return b ? a / b : 0; }
+static double percent (double a, double b) { return average (100 * a, b); }
+
 static void statistics () {
   if (verbosity < 0)
     return;
@@ -107,6 +112,16 @@ static void statistics () {
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
           sat_calls, unsat_calls);
   printf ("c found %zu backbones\n", backbones);
+  printf ("c\n");
+  printf ("c   %10.2f %6.2f %% first\n", first_time,
+          percent (first_time, solving_time));
+  printf ("c   %10.2f %6.2f %% sat\n", sat_time,
+          percent (sat_time, solving_time));
+  printf ("c   %10.2f %6.2f %% unsat\n", unsat_time,
+          percent (unsat_time, solving_time));
+  printf ("c ---------------------------------\n");
+  printf ("c   %10.2f 100.00 %% solving\n", solving_time);
+  printf ("c\n");
   printf ("c\n");
   fflush (stdout);
   if (!solver)
@@ -125,8 +140,11 @@ class CadiBackSignalHandler : public CaDiCaL::Handler {
   }
 };
 
+static double time () { return CaDiCaL::absolute_process_time (); }
+
 static int solve () {
   assert (solver);
+  double start = time ();
   calls++;
   int res = solver->solve ();
   if (res == 10) {
@@ -135,6 +153,15 @@ static int solve () {
     assert (res == 20);
     unsat_calls++;
   }
+  double end = time ();
+  double delta = end - start;
+  if (calls == 1)
+    first_time = delta;
+  else if (res == 10)
+    sat_time += delta;
+  else
+    unsat_time += delta;
+  solving_time += delta;
   return res;
 }
 
@@ -175,7 +202,7 @@ int main (int argc, char **argv) {
   solver = new CaDiCaL::Solver ();
   if (verbosity < 0)
     solver->set ("quiet", 1);
-  else if (verbosity > 0) { 
+  else if (verbosity > 0) {
     solver->set ("verbose", verbosity - 1);
     if (verbosity > 1)
       solver->set ("report", 1);
@@ -205,8 +232,7 @@ int main (int argc, char **argv) {
     res = solve ();
     assert (res == 10 || res == 20);
     if (res == 10) {
-      msg ("solver determined first model after %.2f second",
-           CaDiCaL::absolute_process_time ());
+      msg ("solver determined first model after %.2f second", time ());
       printf ("s SATISFIABLE\n");
       fflush (stdout);
       backbone = new int[vars + 1];
@@ -239,7 +265,8 @@ int main (int argc, char **argv) {
           }
         } else {
           assert (tmp == 20);
-	  dbg ("no model with %d thus found backbone literal %d", -lit, lit);
+          dbg ("no model with %d thus found backbone literal %d", -lit,
+               lit);
           if (print) {
             printf ("b %d\n", lit);
             fflush (stdout);
