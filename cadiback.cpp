@@ -29,9 +29,11 @@ static const char * usage =
 #include "resources.hpp"
 #include "signal.hpp"
 
-static int vars;
+static int vars, literals;
 static int verbosity;
 static const char *path;
+
+static signed char * backbones;
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -124,6 +126,9 @@ int main (int argc, char **argv) {
       }
       if (err)
         die ("%s", err);
+      if (vars == INT_MAX)
+	die ("can not support 'INT_MAX == %d' variables", vars);
+      size = vars++;
     }
     msg ("found %d variables", vars);
     dbg ("starting solving");
