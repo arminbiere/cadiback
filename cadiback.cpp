@@ -1,6 +1,6 @@
 // clang-format off
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 
 static const char * usage =
 
