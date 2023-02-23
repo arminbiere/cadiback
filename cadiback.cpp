@@ -42,8 +42,6 @@ static const char * usage =
 
 static int verbosity;
 
-// Print backbones by default. Otherwise only produce statistics.
-
 static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
 
@@ -167,9 +165,18 @@ static int solve () {
 }
 
 int main (int argc, char **argv) {
+
+  // Print backbones by default. Otherwise only produce statistics.
+  //
   bool print = true;
+
+  // Disable by default  printing those 'c <character> ...' lines
+  // in the solver.  If enabled is useful to see what is going on.
+  //
   bool report = false;
-  const char *path = 0;
+
+  const char *path = 0; // The path to the input file.
+
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h")) {
@@ -199,17 +206,21 @@ int main (int argc, char **argv) {
     else
       path = arg;
   }
+
   msg ("CaDiBack BackBone Analyzer");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
   msg ("Version " VERSION " CaDiCaL %s", CaDiCaL::Solver::version ());
   line ();
+
   solver = new CaDiCaL::Solver ();
+
   if (verbosity < 0)
     solver->set ("quiet", 1);
   else if (verbosity > 0)
     solver->set ("verbose", verbosity - 1);
   if (report || verbosity > 1)
     solver->set ("report", 1);
+
   int res;
   {
     CadiBackSignalHandler handler;
@@ -226,18 +237,20 @@ int main (int argc, char **argv) {
       }
       if (err)
         die ("%s", err);
-      if (vars == INT_MAX)
+      if (vars == INT_MAX) {
         die ("can not support 'INT_MAX == %d' variables", vars);
+	// Otherwise 'vars + 1' as well as the idiom 'idx <= vars' does not
+	// work and for simplicity we force having less variables here.
+      }
     }
     msg ("found %d variables", vars);
     line ();
-    dbg ("starting solving");
+    msg ("starting solving after %.2f seconds", time ());
     res = solve ();
     assert (res == 10 || res == 20);
     if (res == 10) {
-      msg ("solver determined first model after %.2f second", time ());
-      printf ("s SATISFIABLE\n");
-      fflush (stdout);
+      msg ("solver determined first model after %.2f seconds", time ());
+      line ();
       backbone = new int[vars + 1];
       if (!backbone)
         die ("out-of-memory allocating backbone array");
@@ -281,6 +294,9 @@ int main (int argc, char **argv) {
         printf ("b 0\n");
         fflush (stdout);
       }
+      line ();
+      printf ("s SATISFIABLE\n");
+      fflush (stdout);
       delete[] backbone;
     } else {
       assert (res == 20);

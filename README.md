@@ -26,19 +26,21 @@ p cnf 3 4
 2 -3 0
 -2 -3 0
 $ cadiback -q dimacs.cnf
-s SATISFIABLE
 b 1
 b 3
 b 0
+s SATISFIABLE
 ```
 
 This example shows that exactly the two literals `1` and `-3` are backbones
 and that there are models both with `2` and `-2`, i.e., the variable `2` is
 not a backbone variable.  In general the tool can produce multiple `b` lines
 which in principle can be interleaved with comment lines starting with `c`.
-After the analyzer found all backbones it prints the `b 0` line.  The
-backbones are printed as they are found and the output is flushed whenever a
-new backbone is found.  This allows to use the tool in an any time fashion.
-Without the `-q` option more comment lines are printed before and after the
-backbone section.  If the given CNF is unsatisfiable the analyzer prints 's
-UNSATISFIABLE' (and backbone section of course).
+After the analyzer found all backbones it prints the `b 0` line.
+
+The backbones are printed as they are found and the output is flushed
+whenever a new backbone is found.  This allows to use the tool in an
+any-time fashion.  Without the `-q` option more comment lines are printed
+before, between and after the backbone section, and with higher verbosity or
+reporting enabled even in between 'b' lines.  If the given CNF is
+unsatisfiable the analyzer prints 's UNSATISFIABLE' instead at the end.
