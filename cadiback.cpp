@@ -132,13 +132,13 @@ static void statistics () {
     printf ("c   %10.2f %6.2f %% sat\n", sat_time,
             percent (sat_time, solving_time));
   if (verbosity > 0 || satmax_time)
-    printf ("c   %10.2f %6.2f %% sat\n", satmax_time,
+    printf ("c   %10.2f %6.2f %% satmax\n", satmax_time,
             percent (satmax_time, solving_time));
   if (verbosity > 0 || unsat_time)
     printf ("c   %10.2f %6.2f %% unsat\n", unsat_time,
             percent (unsat_time, solving_time));
   if (verbosity > 0 || unsatmax_time)
-    printf ("c   %10.2f %6.2f %% sat\n", unsatmax_time,
+    printf ("c   %10.2f %6.2f %% unsatmax\n", unsatmax_time,
             percent (unsatmax_time, solving_time));
   if (verbosity > 0 || unknown_time)
     printf ("c   %10.2f %6.2f %% unknown\n", unknown_time,
