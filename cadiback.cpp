@@ -124,7 +124,7 @@ static void statistics () {
   printf ("c\n");
   printf ("c found %zu backbones %.0f%% (%zu dropped %.0f%%)\n",
           backbones, percent (backbones, vars),
-	  dropped, percent (backbones, vars));
+	  dropped, percent (dropped, vars));
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n",
 	  calls, sat_calls, unsat_calls);
   printf ("c\n");
