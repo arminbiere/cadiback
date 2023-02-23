@@ -46,6 +46,7 @@ static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
 
 static size_t backbones;     // Number of backbones found.
+static size_t dropped;       // Number of non-backbones found.
 static size_t sat_calls;     // Calls with result SAT to SAT solver.
 static size_t unsat_calls;   // Calls with result UNSAT to SAT solver.
 static size_t unknown_calls; // Interrupted solver calls.
@@ -121,7 +122,9 @@ static void statistics () {
   printf ("c --- [ backbone statistics ] ");
   printf ("------------------------------------------------\n");
   printf ("c\n");
-  printf ("c found %zu backbones\n", backbones);
+  printf ("c found %zu backbones %.0f%% (%zu dropped %.0f%%)\n",
+          backbones, percent (backbones, vars),
+	  dropped, percent (backbones, vars));
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n",
 	  calls, sat_calls, unsat_calls);
   printf ("c\n");
@@ -299,6 +302,7 @@ int main (int argc, char **argv) {
                "negation %d of backbone candidate %d thus dropping %d",
                -lit, lit, lit);
           backbone[idx] = 0;
+	  dropped++;
           for (int other = idx + 1; other <= vars; other++) {
             int candidate = backbone[other];
             if (candidate && candidate != solver->val (other)) {
@@ -306,6 +310,7 @@ int main (int argc, char **argv) {
                    "of other backbone candidate %d thus dropping %d too",
                    -candidate, candidate, candidate);
               backbone[other] = 0;
+	      dropped++;
             }
           }
         } else {
