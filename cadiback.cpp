@@ -1,6 +1,6 @@
 // clang-format off
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 
 static const char * usage =
 
@@ -41,6 +41,15 @@ static const char * usage =
 // Verbosity level: -1=quiet, 0=default, 1=verbose, INT_MAX=logging.
 
 static int verbosity;
+
+// Print backbones by default. Otherwise only produce statistics.
+//
+bool print = true;
+
+// Disable by default  printing those 'c <character> ...' lines
+// in the solver.  If enabled is useful to see what is going on.
+//
+bool report = false;
 
 static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
@@ -122,11 +131,10 @@ static void statistics () {
   printf ("c --- [ backbone statistics ] ");
   printf ("------------------------------------------------\n");
   printf ("c\n");
-  printf ("c found %zu backbones %.0f%% (%zu dropped %.0f%%)\n",
-          backbones, percent (backbones, vars),
-	  dropped, percent (dropped, vars));
-  printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n",
-	  calls, sat_calls, unsat_calls);
+  printf ("c found %zu backbones %.0f%% (%zu dropped %.0f%%)\n", backbones,
+          percent (backbones, vars), dropped, percent (dropped, vars));
+  printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
+          sat_calls, unsat_calls);
   printf ("c\n");
   if (verbosity > 0 || first_time)
     printf ("c   %10.2f %6.2f %% first\n", first_time,
@@ -196,16 +204,43 @@ static int solve () {
   return res;
 }
 
+static void drop_candidate (int idx) {
+  int lit = backbone[idx];
+  if (!lit)
+    return;
+  int val = solver->val (idx);
+  if (lit == val)
+    return;
+  assert (lit == -val);
+  dbg ("model also satisfies negation %d "
+       "of backbone candidate %d thus dropping %d",
+       -lit, lit, lit);
+  backbone[idx] = 0;
+  dropped++;
+}
+
+static void drop_candidates (int start) {
+  for (int idx = start; idx <= vars; idx++)
+    drop_candidate (idx);
+}
+
+static void backbone_variable (int idx) {
+  int lit = backbone[idx];
+  if (!lit)
+    return;
+  if (print) {
+    printf ("b %d\n", lit);
+    fflush (stdout);
+  }
+  backbones++;
+}
+
+static void backbone_variables (int start) {
+  for (int idx = start; idx <= vars; idx++)
+    backbone_variable (idx);
+}
+
 int main (int argc, char **argv) {
-
-  // Print backbones by default. Otherwise only produce statistics.
-  //
-  bool print = true;
-
-  // Disable by default  printing those 'c <character> ...' lines
-  // in the solver.  If enabled is useful to see what is going on.
-  //
-  bool report = false;
 
   const char *path = 0; // The path to the input file.
 
@@ -294,34 +329,49 @@ int main (int argc, char **argv) {
           dbg ("skipping dropped non-backbone variable %d", idx);
           continue;
         }
+        {
+          int assumed = 0;
+          for (int other = idx + 1; other <= vars; other++) {
+            int lit_other = backbone[other];
+            if (!lit_other)
+              continue;
+            solver->constrain (-lit_other);
+            assumed++;
+          }
+          if (assumed++) {
+	    solver->constrain (-lit);
+	    solver->constrain (0);
+	    dbg ("assuming all %d remaining backbone candidates "
+	         "starting with %d", assumed, lit);
+	    int tmp = solve ();
+	    if (tmp == 10) {
+	      dbg ("constraining all backbones candidates starting at %d "
+	           "all-at-once produced model", lit);
+	      drop_candidates (idx);
+	    } else {
+	      assert (tmp == 20);
+	      msg ("all %d remaining candidates starting at %d "
+	           "shown to be backbones in one call", assumed, lit);
+	      backbone_variables (idx);
+	      break;
+	    }
+          } else
+            dbg ("no other literal besides %d remains a backbone candidate",
+                 lit);
+        }
         dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
         solver->assume (-lit);
         int tmp = solve ();
         if (tmp == 10) {
-          dbg ("found model satisfying "
-               "negation %d of backbone candidate %d thus dropping %d",
-               -lit, lit, lit);
-          backbone[idx] = 0;
-	  dropped++;
-          for (int other = idx + 1; other <= vars; other++) {
-            int candidate = backbone[other];
-            if (candidate && candidate != solver->val (other)) {
-              dbg ("model also satisfies negation %d "
-                   "of other backbone candidate %d thus dropping %d too",
-                   -candidate, candidate, candidate);
-              backbone[other] = 0;
-	      dropped++;
-            }
-          }
+          dbg ("found model satisfying single assumed "
+               "negation %d of backbone candidate %d",
+               -lit, lit);
+	  drop_candidates (idx);
         } else {
           assert (tmp == 20);
           dbg ("no model with %d thus found backbone literal %d", -lit,
                lit);
-          if (print) {
-            printf ("b %d\n", lit);
-            fflush (stdout);
-          }
-          backbones++;
+	  backbone_variable (idx);
         }
       }
       if (print) {
