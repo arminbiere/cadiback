@@ -45,12 +45,14 @@ static int verbosity;
 static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
 
-static size_t backbones;   // Number of backbones found.
-static size_t sat_calls;   // Calls with result SAT to SAT solver.
-static size_t unsat_calls; // Calls with result UNSAT to SAT solver.
-static size_t calls;       // Calls to SAT solver.
+static size_t backbones;     // Number of backbones found.
+static size_t sat_calls;     // Calls with result SAT to SAT solver.
+static size_t unsat_calls;   // Calls with result UNSAT to SAT solver.
+static size_t unknown_calls; // Interrupted solver calls.
+static size_t calls;         // Calls to SAT solver.
 
-static double first_time, sat_time, unsat_time, solving_time;
+static double first_time, sat_time, unsat_time, solving_time, unknown_time;
+static volatile double started = -1;
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -101,23 +103,38 @@ static CaDiCaL::Solver *solver;
 static double average (double a, double b) { return b ? a / b : 0; }
 static double percent (double a, double b) { return average (100 * a, b); }
 
+static double time () { return CaDiCaL::absolute_process_time (); }
+
 static void statistics () {
   if (verbosity < 0)
     return;
+  if (started >= 0) {
+    double end = time ();
+    double delta = end - started;
+    started = -1;
+    unknown_time += delta;
+    unknown_calls++;
+  }
   printf ("c\n");
   printf ("c --- [ backbone statistics ] ");
   printf ("------------------------------------------------\n");
   printf ("c\n");
-  printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
-          sat_calls, unsat_calls);
   printf ("c found %zu backbones\n", backbones);
+  printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n",
+	  calls, sat_calls, unsat_calls);
   printf ("c\n");
-  printf ("c   %10.2f %6.2f %% first\n", first_time,
-          percent (first_time, solving_time));
-  printf ("c   %10.2f %6.2f %% sat\n", sat_time,
-          percent (sat_time, solving_time));
-  printf ("c   %10.2f %6.2f %% unsat\n", unsat_time,
-          percent (unsat_time, solving_time));
+  if (verbosity > 0 || first_time)
+    printf ("c   %10.2f %6.2f %% first\n", first_time,
+            percent (first_time, solving_time));
+  if (verbosity > 0 || sat_time)
+    printf ("c   %10.2f %6.2f %% sat\n", sat_time,
+            percent (sat_time, solving_time));
+  if (verbosity > 0 || unsat_time)
+    printf ("c   %10.2f %6.2f %% unsat\n", unsat_time,
+            percent (unsat_time, solving_time));
+  if (verbosity > 0 || unknown_time)
+    printf ("c   %10.2f %6.2f %% unknown\n", unknown_time,
+            percent (unknown_time, solving_time));
   printf ("c ---------------------------------\n");
   printf ("c   %10.2f 100.00 %% solving\n", solving_time);
   printf ("c\n");
@@ -139,11 +156,9 @@ class CadiBackSignalHandler : public CaDiCaL::Handler {
   }
 };
 
-static double time () { return CaDiCaL::absolute_process_time (); }
-
 static int solve () {
   assert (solver);
-  double start = time ();
+  started = time ();
   calls++;
   int res = solver->solve ();
   if (res == 10) {
@@ -153,7 +168,8 @@ static int solve () {
     unsat_calls++;
   }
   double end = time ();
-  double delta = end - start;
+  double delta = end - started;
+  started = -1;
   if (calls == 1)
     first_time = delta;
   else if (res == 10)
@@ -239,8 +255,8 @@ int main (int argc, char **argv) {
         die ("%s", err);
       if (vars == INT_MAX) {
         die ("can not support 'INT_MAX == %d' variables", vars);
-	// Otherwise 'vars + 1' as well as the idiom 'idx <= vars' does not
-	// work and for simplicity we force having less variables here.
+        // Otherwise 'vars + 1' as well as the idiom 'idx <= vars' does not
+        // work and for simplicity we force having less variables here.
       }
     }
     msg ("found %d variables", vars);
