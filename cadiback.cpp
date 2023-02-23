@@ -114,6 +114,7 @@ static void statistics () {
     double delta = end - started;
     started = -1;
     unknown_time += delta;
+    solving_time += delta;
     unknown_calls++;
   }
   printf ("c\n");
