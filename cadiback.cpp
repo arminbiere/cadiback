@@ -52,6 +52,7 @@ static size_t unknown_calls; // Interrupted solver calls.
 static size_t calls;         // Calls to SAT solver.
 
 static double first_time, sat_time, unsat_time, solving_time, unknown_time;
+static double satmax_time, unsatmax_time;
 static volatile double started = -1;
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -129,9 +130,15 @@ static void statistics () {
   if (verbosity > 0 || sat_time)
     printf ("c   %10.2f %6.2f %% sat\n", sat_time,
             percent (sat_time, solving_time));
+  if (verbosity > 0 || satmax_time)
+    printf ("c   %10.2f %6.2f %% sat\n", satmax_time,
+            percent (satmax_time, solving_time));
   if (verbosity > 0 || unsat_time)
     printf ("c   %10.2f %6.2f %% unsat\n", unsat_time,
             percent (unsat_time, solving_time));
+  if (verbosity > 0 || unsatmax_time)
+    printf ("c   %10.2f %6.2f %% sat\n", unsatmax_time,
+            percent (unsatmax_time, solving_time));
   if (verbosity > 0 || unknown_time)
     printf ("c   %10.2f %6.2f %% unknown\n", unknown_time,
             percent (unknown_time, solving_time));
@@ -172,10 +179,15 @@ static int solve () {
   started = -1;
   if (calls == 1)
     first_time = delta;
-  else if (res == 10)
+  if (res == 10) {
     sat_time += delta;
-  else
+    if (delta > satmax_time)
+      satmax_time = delta;
+  } else {
     unsat_time += delta;
+    if (delta > unsatmax_time)
+      unsatmax_time = delta;
+  }
   solving_time += delta;
   return res;
 }
