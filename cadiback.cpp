@@ -162,7 +162,7 @@ static void statistics () {
   if (verbosity > 0 || unknown_time)
     printf ("c   %10.2f %6.2f %% unknown\n", unknown_time,
             percent (unknown_time, solving_time));
-  printf ("c ---------------------------------\n");
+  printf ("c ====================================\n");
   printf ("c   %10.2f 100.00 %% solving\n", solving_time);
   printf ("c\n");
   printf ("c\n");
