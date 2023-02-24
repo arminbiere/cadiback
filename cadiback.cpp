@@ -169,7 +169,7 @@ static void statistics () {
   fflush (stdout);
   if (!solver)
     return;
-  if (verbosity > 0)
+  if (always_print_statistics || verbosity > 0)
     solver->statistics ();
   solver->resources ();
 }
