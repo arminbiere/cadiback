@@ -1,6 +1,6 @@
 // clang-format off
 
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 
 static const char * usage =
 
@@ -8,16 +8,17 @@ static const char * usage =
 "\n"
 "where '<option>' is one of the following\n"
 "\n"
-"  -h          print this command line option summary\n"
-"  -l          extensive logging for debugging\n"
-"  -q          disable all messages\n"
-"  -r          report what the solver is doing\n"
-"  -n          do not print backbone \n"
+"  -h            print this command line option summary\n"
+"  -l            extensive logging for debugging\n"
+"  -n            do not print backbone \n"
+"  -q            disable all messages\n"
+"  -r            report what the solver is doing\n"
+"  -s            always print full statistics (not only with '-v')\n"
+"  -v            increase verbosity\n"
+"                (SAT solver verbosity is increased with two '-v')\n"
 "\n"
-"  -v          increase verbosity\n"
-"              (SAT solver verbosity is increased with two '-v')\n"
-"\n"
-"  --version   print version and exit\n"
+"  --one-by-one  try each candidate one-by-one (do not use 'constrain')\n"
+"  --version     print version and exit\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
 "determined and then printed (unless '-n' is specified).  If no input\n"
@@ -50,6 +51,13 @@ bool print = true;
 // in the solver.  If enabled is useful to see what is going on.
 //
 bool report = false;
+
+bool always_print_statistics;
+
+// Try each candidate after each other with a single assumption, i.e., do
+// not use the 'constrain' optimization.
+//
+bool one_by_one;
 
 static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
@@ -136,7 +144,7 @@ static void statistics () {
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
           sat_calls, unsat_calls);
   printf ("c\n");
-  if (verbosity > 0 || first_time)
+  if (always_print_statistics || verbosity > 0 || first_time)
     printf ("c   %10.2f %6.2f %% first\n", first_time,
             percent (first_time, solving_time));
   if (verbosity > 0 || sat_time)
@@ -261,11 +269,15 @@ int main (int argc, char **argv) {
       verbosity = -1;
     } else if (!strcmp (arg, "-r")) {
       report = true;
+    } else if (!strcmp (arg, "-s")) {
+      always_print_statistics = true;
     } else if (!strcmp (arg, "-v")) {
       if (verbosity < 0)
         verbosity = 1;
       else if (verbosity < INT_MAX)
         verbosity++;
+    } else if (!strcmp (arg, "--one-by-one")) {
+      one_by_one = true;
     } else if (*arg == '-')
       die ("invalid option '%s' (try '-h')", arg);
     else if (path)
@@ -329,7 +341,7 @@ int main (int argc, char **argv) {
           dbg ("skipping dropped non-backbone variable %d", idx);
           continue;
         }
-        {
+	if (!one_by_one) {
           int assumed = 0;
           for (int other = idx + 1; other <= vars; other++) {
             int lit_other = backbone[other];
