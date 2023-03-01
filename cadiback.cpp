@@ -1,7 +1,5 @@
 // clang-format off
 
-#define VERSION "0.1.4"
-
 static const char * usage =
 
 "usage: cadiback [ <option> ... ] [ <dimacs> ]\n"
@@ -36,8 +34,10 @@ static const char * usage =
 #include <cstring>
 
 #include "cadical.hpp"
+#include "config.hpp"
 #include "resources.hpp"
 #include "signal.hpp"
+#include "version.hpp"
 
 // Verbosity level: -1=quiet, 0=default, 1=verbose, INT_MAX=logging.
 
@@ -288,7 +288,9 @@ int main (int argc, char **argv) {
 
   msg ("CaDiBack BackBone Analyzer");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
-  msg ("Version " VERSION " CaDiCaL %s", CaDiCaL::Solver::version ());
+  msg ("Version " VERSION " " GITID);
+  msg ("CaDiCaL %s %s", CaDiCaL::version (), CaDiCaL::identifier ());
+  msg ("Compiled with '%s'", BUILD);
   line ();
 
   solver = new CaDiCaL::Solver ();

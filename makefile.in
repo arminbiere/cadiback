@@ -2,12 +2,14 @@ COMPILE=@COMPILE@
 all: cadiback
 cadiback: cadiback.o ../cadical/build/libcadical.a makefile
 	$(COMPILE) -o $@ $< -L../cadical/build -lcadical
-cadiback.o: cadiback.cpp ../cadical/src/cadical.hpp makefile
+cadiback.o: cadiback.cpp config.hpp ../cadical/src/cadical.hpp makefile
 	$(COMPILE) -c $< -I../cadical/src
+config.hpp: generate makefile
+	./generate > $@
 format:
 	clang-format cadiback.cpp
 test: all
 	./test/run.sh
 clean:
-	rm -f cadiback.o cadiback makefile test/*log test/*err
+	rm -f cadiback.o config.hpp cadiback makefile test/*log test/*err
 .PHONY: all clean format test
