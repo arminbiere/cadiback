@@ -6,17 +6,18 @@ static const char * usage =
 "\n"
 "where '<option>' is one of the following\n"
 "\n"
-"  -h            print this command line option summary\n"
-"  -l            extensive logging for debugging\n"
-"  -n            do not print backbone \n"
-"  -q            disable all messages\n"
-"  -r            report what the solver is doing\n"
-"  -s            always print full statistics (not only with '-v')\n"
-"  -v            increase verbosity\n"
-"                (SAT solver verbosity is increased with two '-v')\n"
+"  -h                 print this command line option summary\n"
+"  -l                 extensive logging for debugging\n"
+"  -n                 do not print backbone \n"
+"  -q                 disable all messages\n"
+"  -r                 report what the solver is doing\n"
+"  -s                 always print full statistics (not only with '-v')\n"
+"  -v                 increase verbosity\n"
+"                     (SAT solver verbosity is increased with two '-v')\n"
 "\n"
-"  --one-by-one  try each candidate one-by-one (do not use 'constrain')\n"
-"  --version     print version and exit\n"
+"  --eager-constrain  do not delay constraint until last call unsatisfiable\n"
+"  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
+"  --version          print version and exit\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
 "determined and then printed (unless '-n' is specified).  If no input\n"
@@ -58,6 +59,11 @@ bool always_print_statistics;
 // not use the 'constrain' optimization.
 //
 bool one_by_one;
+
+// Do not delay 'constrain' until after the next 'UNSAT' call.  This only
+// makes sense if 'one_by_one' is off of course.
+//
+bool eager_constrain;
 
 static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
@@ -276,6 +282,8 @@ int main (int argc, char **argv) {
         verbosity = 1;
       else if (verbosity < INT_MAX)
         verbosity++;
+    } else if (!strcmp (arg, "--eager-constrain")) {
+      eager_constrain = true;
     } else if (!strcmp (arg, "--one-by-one")) {
       one_by_one = true;
     } else if (*arg == '-')
@@ -330,20 +338,41 @@ int main (int argc, char **argv) {
     res = solve ();
     assert (res == 10 || res == 20);
     if (res == 10) {
+      int last = 20;
       msg ("solver determined first model after %.2f seconds", time ());
       line ();
       backbone = new int[vars + 1];
       if (!backbone)
         die ("out-of-memory allocating backbone array");
-      for (int idx = 1; idx <= vars; idx++)
-        backbone[idx] = solver->val (idx);
       for (int idx = 1; idx <= vars; idx++) {
+	int lit = solver->val (idx);
+        backbone[idx] = lit;
+	solver->phase (-lit);	// Set opposite value as default phase.
+      }
+
+      for (int idx = 1; idx <= vars; idx++) {
+
+	// First skip variables that have been dropped as candidates.
+
         int lit = backbone[idx];
         if (!backbone[idx]) {
           dbg ("skipping dropped non-backbone variable %d", idx);
           continue;
         }
-	if (!one_by_one) {
+
+	// If enabled and if either in eager mode or last solving found a
+	// backbone use the 'constrain' optimization which assumes the
+	// disjunction of all remaining possible backbone candidate literals
+	// using the 'constrain' API call described in our FMCAD'21 paper.
+
+        // If the remaining set of backbone candidates are all backbones
+	// then only this call is enough to prove that, otherwise without
+	// 'constrain' we need as many solver calls as there are candidates.
+	// This in turned put heavy load on the 'restore' algorithm which in
+	// some instances then ended up taking 99% of the running time.
+
+	if (!one_by_one && 
+	    (eager_constrain || last == 20)) {
           int assumed = 0;
           for (int other = idx + 1; other <= vars; other++) {
             int lit_other = backbone[other];
@@ -357,26 +386,29 @@ int main (int argc, char **argv) {
 	    solver->constrain (0);
 	    dbg ("assuming all %d remaining backbone candidates "
 	         "starting with %d", assumed, lit);
-	    int tmp = solve ();
-	    if (tmp == 10) {
+	    last = solve ();
+	    if (last == 10) {
 	      dbg ("constraining all backbones candidates starting at %d "
 	           "all-at-once produced model", lit);
 	      drop_candidates (idx);
 	    } else {
-	      assert (tmp == 20);
+	      assert (last == 20);
 	      msg ("all %d remaining candidates starting at %d "
 	           "shown to be backbones in one call", assumed, lit);
 	      backbone_variables (idx);
 	      break;
 	    }
-          } else
+          } else {
+
             dbg ("no other literal besides %d remains a backbone candidate",
                  lit);
+	  }
         }
+
         dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
         solver->assume (-lit);
-        int tmp = solve ();
-        if (tmp == 10) {
+        last = solve ();
+        if (last == 10) {
           dbg ("found model satisfying single assumed "
                "negation %d of backbone candidate %d",
                -lit, lit);
@@ -388,14 +420,24 @@ int main (int argc, char **argv) {
 	  backbone_variable (idx);
         }
       }
+
+      // All backbones found so terminate the backbone list with 'b 0'.
+
       if (print) {
         printf ("b 0\n");
         fflush (stdout);
       }
+
+      // We only print 's SATISFIABLE' here which is supposed to indicate
+      // that the run completed.  Otherwise printing it before printing 'b'
+      // lines confuses scripts (and 'zummarize').
+
       line ();
       printf ("s SATISFIABLE\n");
       fflush (stdout);
+
       delete[] backbone;
+
     } else {
       assert (res == 20);
       printf ("s UNSATISFIABLE\n");
