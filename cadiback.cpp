@@ -6,6 +6,7 @@ static const char * usage =
 "\n"
 "where '<option>' is one of the following\n"
 "\n"
+"  -c                 check that backbones are really backbones\n"
 "  -h                 print this command line option summary\n"
 "  -l                 extensive logging for debugging\n"
 "  -n                 do not print backbone \n"
@@ -43,21 +44,26 @@ static const char * usage =
 
 static int verbosity;
 
+// Checker solver to check that backbones are really back-bones.
+//
+static bool check;
+static CaDiCaL::Solver * checker;
+
 // Print backbones by default. Otherwise only produce statistics.
 //
-bool print = true;
+static bool print = true;
 
 // Disable by default  printing those 'c <character> ...' lines
 // in the solver.  If enabled is useful to see what is going on.
 //
-bool report = false;
+static bool report = false;
 
-bool always_print_statistics;
+static bool always_print_statistics;
 
 // Try each candidate after each other with a single assumption, i.e., do
 // not use the 'constrain' optimization.
 //
-bool one_by_one;
+static bool one_by_one;
 
 static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
@@ -261,6 +267,13 @@ static void backbone_variable (int idx) {
   if (print) {
     printf ("b %d\n", lit);
     fflush (stdout);
+    if (checker) {
+      dbg ("checking backbone %d", lit);
+      checker->assume (-lit);
+      int tmp = checker->solve ();
+      if (tmp != 20)
+	die ("checking claimed backbone %d failed", lit);
+    }
   }
   backbones++;
 }
@@ -283,6 +296,8 @@ int main (int argc, char **argv) {
       fputs (VERSION, stdout);
       fputc ('\n', stdout);
       exit (0);
+    } else if (!strcmp (arg, "-c")) {
+      check = true;
     } else if (!strcmp (arg, "-l")) {
       verbosity = INT_MAX;
     } else if (!strcmp (arg, "-n")) {
@@ -347,7 +362,13 @@ int main (int argc, char **argv) {
       }
     }
     msg ("found %d variables", vars);
+    if (check) {
+      checker = new CaDiCaL::Solver ();
+      solver->copy (*checker);
+      msg ("generated checker solver as copy of main solver");
+    }
     line ();
+
     msg ("starting solving after %.2f seconds", time ());
     res = solve ();
     assert (res == 10 || res == 20);
@@ -483,6 +504,8 @@ int main (int argc, char **argv) {
     CaDiCaL::Signal::reset ();
   }
   delete solver;
+  if (checker)
+    delete checker;
   line ();
   msg ("exit %d", res);
   return res;
