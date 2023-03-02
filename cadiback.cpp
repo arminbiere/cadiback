@@ -144,7 +144,7 @@ static void statistics () {
           percent (backbones, vars), dropped, percent (dropped, vars));
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
           sat_calls, unsat_calls);
-  printf ("c successfully flipped %zu literals %.0f%%",
+  printf ("c successfully flipped %zu literals %.0f%%\n",
            flipped, percent (flipped, vars));
   printf ("c\n");
   if (always_print_statistics || verbosity > 0 || first_time)
