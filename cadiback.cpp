@@ -218,11 +218,12 @@ static int solve () {
 static void try_to_flip_remaining (int start) {
   for (size_t round = 0, changed = 1; changed; round++, changed = 0) {
     for (int idx = start; idx <= vars; idx++) {
-      if (!backbone[idx])
+      int lit = backbone[idx];
+      if (!lit)
 	continue;
-      if (!solver->flip (idx))
+      if (!solver->flip (lit))
 	continue;
-      dbg ("flipped value of %d", idx);
+      dbg ("flipped value of %d", lit);
       backbone[idx] = 0;
       flipped++;
       changed++;
