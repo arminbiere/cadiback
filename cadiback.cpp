@@ -68,6 +68,7 @@ static size_t sat_calls;     // Calls with result SAT to SAT solver.
 static size_t unsat_calls;   // Calls with result UNSAT to SAT solver.
 static size_t unknown_calls; // Interrupted solver calls.
 static size_t flipped;       // How often 'solver->flip (lit)' succeeded.
+static size_t fixed;         // How often backbones were fixed.
 static size_t calls;         // Calls to SAT solver.
 
 static double first_time, sat_time, unsat_time, solving_time, unknown_time;
@@ -144,8 +145,10 @@ static void statistics () {
           percent (backbones, vars), dropped, percent (dropped, vars));
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
           sat_calls, unsat_calls);
-  printf ("c successfully flipped %zu literals %.0f%%\n",
-           flipped, percent (flipped, vars));
+  printf ("c successfully flipped %zu literals %.0f%%\n", flipped,
+          percent (flipped, vars));
+  printf ("c found %zu fixed candidates %.0f%%\n", fixed,
+          percent (fixed, vars));
   printf ("c\n");
   if (always_print_statistics || verbosity > 0 || first_time)
     printf ("c   %10.2f %6.2f %% first\n", first_time,
@@ -220,9 +223,9 @@ static void try_to_flip_remaining (int start) {
     for (int idx = start; idx <= vars; idx++) {
       int lit = backbone[idx];
       if (!lit)
-	continue;
+        continue;
       if (!solver->flip (lit))
-	continue;
+        continue;
       dbg ("flipped value of %d", lit);
       backbone[idx] = 0;
       flipped++;
@@ -368,10 +371,27 @@ int main (int argc, char **argv) {
         // First skip variables that have been dropped as candidates.
 
         int lit = backbone[idx];
-        if (!backbone[idx]) {
+        if (!lit) {
           dbg ("skipping dropped non-backbone variable %d", idx);
           continue;
         }
+
+	{
+	  int tmp = solver->fixed (lit);
+
+	  if (tmp > 0) {
+	    dbg ("keeping already fixed backbone %d", lit);
+	    fixed++;
+	    continue;
+	  }
+
+	  if (tmp < 0) {
+	    dbg ("skipping backbone %d candidate as it was fixed", lit);
+	    backbone[idx] = 0;
+	    fixed++;
+	    continue;
+	  }
+	}
 
         // If enabled we use the 'constrain' optimization which assumes the
         // disjunction of all remaining possible backbone candidate literals
@@ -404,7 +424,7 @@ int main (int argc, char **argv) {
                    "all-at-once produced model",
                    lit);
               drop_candidates (idx);
-	      try_to_flip_remaining (idx + 1);
+              try_to_flip_remaining (idx + 1);
             } else {
               assert (tmp == 20);
               msg ("all %d remaining candidates starting at %d "
@@ -428,7 +448,7 @@ int main (int argc, char **argv) {
                "negation %d of backbone candidate %d",
                -lit, lit);
           drop_candidates (idx);
-	  try_to_flip_remaining (idx + 1);
+          try_to_flip_remaining (idx + 1);
         } else {
           assert (tmp == 20);
           dbg ("no model with %d thus found backbone literal %d", -lit,
