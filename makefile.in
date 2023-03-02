@@ -7,7 +7,7 @@ cadiback.o: cadiback.cpp config.hpp ../cadical/src/cadical.hpp makefile
 config.hpp: generate makefile
 	./generate > $@
 format:
-	clang-format cadiback.cpp
+	clang-format -i cadiback.cpp
 test: all
 	./test/run.sh
 clean:
