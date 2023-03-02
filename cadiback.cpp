@@ -224,6 +224,14 @@ static int solve () {
   return res;
 }
 
+static void check_model (int lit) {
+  dbg ("checking that there is a model with %d", lit);
+  checker->assume (lit);
+  int tmp = checker->solve ();
+  if (tmp != 10)
+    die ("checking claimed model for %d failed", lit);
+}
+
 static void try_to_flip_remaining (int start) {
   for (size_t round = 0, changed = 1; changed; round++, changed = 0) {
     for (int idx = start; idx <= vars; idx++) {
@@ -236,6 +244,8 @@ static void try_to_flip_remaining (int start) {
       backbone[idx] = 0;
       flipped++;
       changed++;
+      if (check)
+	check_model (-lit);
     }
   }
 }
@@ -253,6 +263,8 @@ static void drop_candidate (int idx) {
        -lit, lit, lit);
   backbone[idx] = 0;
   dropped++;
+  if (check)
+    check_model (-lit);
 }
 
 static void drop_candidates (int start) {
@@ -267,13 +279,13 @@ static void backbone_variable (int idx) {
   if (print) {
     printf ("b %d\n", lit);
     fflush (stdout);
-    if (checker) {
-      dbg ("checking backbone %d", lit);
-      checker->assume (-lit);
-      int tmp = checker->solve ();
-      if (tmp != 20)
-	die ("checking claimed backbone %d failed", lit);
-    }
+  }
+  if (checker) {
+    dbg ("checking backbone %d", lit);
+    checker->assume (-lit);
+    int tmp = checker->solve ();
+    if (tmp != 20)
+      die ("checking claimed backbone %d failed", lit);
   }
   backbones++;
 }
@@ -402,6 +414,7 @@ int main (int argc, char **argv) {
 
 	  if (tmp > 0) {
 	    dbg ("keeping already fixed backbone %d", lit);
+	    backbone_variable (idx);
 	    fixed++;
 	    continue;
 	  }
@@ -409,6 +422,8 @@ int main (int argc, char **argv) {
 	  if (tmp < 0) {
 	    dbg ("skipping backbone %d candidate as it was fixed", lit);
 	    backbone[idx] = 0;
+	    if (check)
+	      check_model (-lit);
 	    fixed++;
 	    continue;
 	  }
