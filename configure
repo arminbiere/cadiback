@@ -18,6 +18,35 @@ msg () {
   echo "[configure] $*"
 }
 
+checkdir () {
+  [ -d "$1" ] || die "could not find '$1'"
+}
+
+checkfile () {
+  [ -f "$1" ] || die "could not find '$1'"
+}
+
+[ x"$CADICAL" = x ] && CADICAL="../cadical"
+
+checkdir "$CADICAL"
+cadicalversion="`cat $CADICAL/VERSION`"
+msg "Using CADICAL='$CADICAL' version '$cadicalversion'"
+
+checkdir "$CADICAL/src"
+checkdir "$CADICAL/build"
+
+checkfile "$CADICAL/src/cadical.hpp"
+checkfile "$CADICAL/build/libcadical.a"
+
+if [ x"`grep 'bool flip' $CADICAL/src/cadical.hpp`" = x ]
+then
+  msg "CaDiCaL does not support 'bool flip (int lit)'"
+  flip=no
+else
+  msg "CaDiCaL supports 'bool flip (int lit)'"
+  flip=yes
+fi
+
 while [ $# -gt 0 ]
 do
   case $1 in
@@ -41,6 +70,8 @@ then
 else
   COMPILE="$COMPILE -O3 -DNDEBUG"
 fi
+
+[ $flip = no ] && COMPILE="$COMPILE -DNFLIP"
 
 msg "Compiling with '$COMPILE'"
 

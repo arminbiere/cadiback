@@ -67,6 +67,7 @@ static size_t dropped;       // Number of non-backbones found.
 static size_t sat_calls;     // Calls with result SAT to SAT solver.
 static size_t unsat_calls;   // Calls with result UNSAT to SAT solver.
 static size_t unknown_calls; // Interrupted solver calls.
+static size_t flipped;       // How often 'solver->flip (lit)' succeeded.
 static size_t calls;         // Calls to SAT solver.
 
 static double first_time, sat_time, unsat_time, solving_time, unknown_time;
@@ -143,6 +144,8 @@ static void statistics () {
           percent (backbones, vars), dropped, percent (dropped, vars));
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
           sat_calls, unsat_calls);
+  printf ("c successfully flipped %zu literals %.0f%%",
+           flipped, percent (flipped, vars));
   printf ("c\n");
   if (always_print_statistics || verbosity > 0 || first_time)
     printf ("c   %10.2f %6.2f %% first\n", first_time,
@@ -210,6 +213,21 @@ static int solve () {
   }
   solving_time += delta;
   return res;
+}
+
+static void try_to_flip_remaining (int start) {
+  for (size_t round = 0, changed = 1; changed; round++, changed = 0) {
+    for (int idx = start; idx <= vars; idx++) {
+      if (!backbone[idx])
+	continue;
+      if (!solver->flip (idx))
+	continue;
+      dbg ("flipped value of %d", idx);
+      backbone[idx] = 0;
+      flipped++;
+      changed++;
+    }
+  }
 }
 
 static void drop_candidate (int idx) {
@@ -330,9 +348,9 @@ int main (int argc, char **argv) {
     res = solve ();
     assert (res == 10 || res == 20);
     if (res == 10) {
-      int last = 20;
       msg ("solver determined first model after %.2f seconds", time ());
       line ();
+
       backbone = new int[vars + 1];
       if (!backbone)
         die ("out-of-memory allocating backbone array");
@@ -341,6 +359,8 @@ int main (int argc, char **argv) {
         backbone[idx] = lit;
         solver->phase (-lit); // Set opposite value as default phase.
       }
+
+      try_to_flip_remaining (1);
 
       for (int idx = 1; idx <= vars; idx++) {
 
@@ -377,14 +397,15 @@ int main (int argc, char **argv) {
             dbg ("assuming all %d remaining backbone candidates "
                  "starting with %d",
                  assumed, lit);
-            last = solve ();
-            if (last == 10) {
+            int tmp = solve ();
+            if (tmp == 10) {
               dbg ("constraining all backbones candidates starting at %d "
                    "all-at-once produced model",
                    lit);
               drop_candidates (idx);
+	      try_to_flip_remaining (idx + 1);
             } else {
-              assert (last == 20);
+              assert (tmp == 20);
               msg ("all %d remaining candidates starting at %d "
                    "shown to be backbones in one call",
                    assumed, lit);
@@ -400,12 +421,13 @@ int main (int argc, char **argv) {
 
         dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
         solver->assume (-lit);
-        last = solve ();
-        if (last == 10) {
+        int tmp = solve ();
+        if (tmp == 10) {
           dbg ("found model satisfying single assumed "
                "negation %d of backbone candidate %d",
                -lit, lit);
           drop_candidates (idx);
+	  try_to_flip_remaining (idx + 1);
         } else {
           assert (tmp == 20);
           dbg ("no model with %d thus found backbone literal %d", -lit,
