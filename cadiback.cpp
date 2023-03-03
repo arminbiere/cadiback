@@ -504,14 +504,15 @@ int main (int argc, char **argv) {
 
         // First skip variables that have been dropped as candidates.
 
-        int lit = backbone[idx];
+        int lit;
 
-RESTART:
-
+        lit = backbone[idx];
         if (!lit) {
           dbg ("skipping dropped non-backbone variable %d", idx);
           continue;
         }
+
+      TRY_SAME_CANDIDATE_AGAIN:
 
         if (!no_fixed) {
           int tmp = solver->fixed (lit);
@@ -574,9 +575,12 @@ RESTART:
                    lit);
               drop_candidates (idx);
               try_to_flip_remaining (idx);
-	      if (backbone[idx])
-		goto RESTART;
-              continue;
+
+              lit = backbone[idx];
+              if (lit)
+                goto TRY_SAME_CANDIDATE_AGAIN;
+
+              continue; // ... with next candidate.
             }
 
             assert (tmp == 20);
