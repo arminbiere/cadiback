@@ -90,6 +90,7 @@ static size_t unsat_calls;   // Calls with result UNSAT to SAT solver.
 static size_t unknown_calls; // Interrupted solver calls.
 static size_t fixed;         // How often backbones were fixed.
 static size_t calls;         // Calls to SAT solver.
+
 #ifndef NFLIP
 static size_t flipped; // How often 'solver->flip (lit)' succeeded.
 #endif
@@ -275,18 +276,35 @@ static void check_backbone (int lit) {
 
 #ifndef NFLIP
 
+// This is the technique first implemented in 'Kitten' for SAT sweeping
+// within 'Kissat', which tries to flip the value in a model of the formula
+// without making the formula false.  It goes over the watches of the
+// literal and checks if all watched clauses are double satisfied and also
+// replaces watches if the second satisfying literal is not watched.
+
+// This requires support by 'CaDiCaL' via the 'bool flip (int lit)'
+// function, which is slightly more expensive than the one in 'Kitten' as in
+// essence it is compatible with blocking literals (used in 'CaDiCaL' but
+// not in 'Kitten').  The first attempt to 'flip' a literal will need to
+// propagate all the assigned literals and find replacement watches while
+// ignoring blocking literals.
+
+// We to flip all remaining backbone candidate literals until none can be
+// flipped anymore.  This optimization pays off if on average one literal
+// can be flipped but still is pretty cheap if not.
+
 static void try_to_flip_remaining (int start) {
   if (do_not_flip)
     return;
 
-  for (size_t round = 0, changed = 1; changed; round++, changed = 0) {
+  for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
     for (int idx = start; idx <= vars; idx++) {
       int lit = backbone[idx];
       if (!lit)
         continue;
       if (!solver->flip (lit))
         continue;
-      dbg ("flipped value of %d", lit);
+      dbg ("flipped value of %d in round %d", lit, round);
       backbone[idx] = 0;
       flipped++;
       changed++;
@@ -375,7 +393,7 @@ int main (int argc, char **argv) {
       else if (verbosity < INT_MAX)
         verbosity++;
     } else if (!strcmp (arg, "--do-not-flip")) {
-#ifdef NFLIP
+#ifndef NFLIP
       do_not_flip = true;
 #else
       die ("invalid option '%s' (CaDiCaL without 'bool flip (int)')", arg);
