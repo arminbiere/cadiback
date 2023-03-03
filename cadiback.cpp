@@ -16,6 +16,9 @@ static const char * usage =
 "  -v                 increase verbosity\n"
 "                     (SAT solver verbosity is increased with two '-v')\n"
 "\n"
+#ifndef NFLIP
+"  --do-not-flip      do not try to flip values of candidates in models\n"
+#endif
 "  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
 "  --version          print version and exit\n"
 "\n"
@@ -58,7 +61,19 @@ static bool print = true;
 //
 static bool report = false;
 
+// From command line option '-s'.
+//
 static bool always_print_statistics;
+
+#ifndef NFLIP
+
+// There is an extension of CaDiCaL with the 'bool flip (lit)' API call
+// which allows to flip values of literals in a given model.  This is
+// cheaper than resetting the SAT solver and calling 'solve ()'.
+//
+static bool do_not_flip;
+
+#endif
 
 // Try each candidate after each other with a single assumption, i.e., do
 // not use the 'constrain' optimization.
@@ -73,9 +88,11 @@ static size_t dropped;       // Number of non-backbones found.
 static size_t sat_calls;     // Calls with result SAT to SAT solver.
 static size_t unsat_calls;   // Calls with result UNSAT to SAT solver.
 static size_t unknown_calls; // Interrupted solver calls.
-static size_t flipped;       // How often 'solver->flip (lit)' succeeded.
 static size_t fixed;         // How often backbones were fixed.
 static size_t calls;         // Calls to SAT solver.
+#ifndef NFLIP
+static size_t flipped; // How often 'solver->flip (lit)' succeeded.
+#endif
 
 static double first_time, sat_time, unsat_time, solving_time, unknown_time;
 static double satmax_time, unsatmax_time;
@@ -165,8 +182,10 @@ static void statistics () {
           percent (backbones, vars), dropped, percent (dropped, vars));
   printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
           sat_calls, unsat_calls);
+#ifndef NFLIP
   printf ("c successfully flipped %zu literals %.0f%%\n", flipped,
           percent (flipped, vars));
+#endif
   printf ("c found %zu fixed candidates %.0f%%\n", fixed,
           percent (fixed, vars));
   printf ("c\n");
@@ -254,7 +273,12 @@ static void check_backbone (int lit) {
     fatal ("checking %d backbone failed", -lit);
 }
 
+#ifndef NFLIP
+
 static void try_to_flip_remaining (int start) {
+  if (do_not_flip)
+    return;
+
   for (size_t round = 0, changed = 1; changed; round++, changed = 0) {
     for (int idx = start; idx <= vars; idx++) {
       int lit = backbone[idx];
@@ -271,6 +295,14 @@ static void try_to_flip_remaining (int start) {
     }
   }
 }
+
+#else
+
+#define try_to_flip_remaining(START) \
+  do { \
+  } while (0)
+
+#endif
 
 static void drop_candidate (int idx) {
   int lit = backbone[idx];
@@ -342,6 +374,12 @@ int main (int argc, char **argv) {
         verbosity = 1;
       else if (verbosity < INT_MAX)
         verbosity++;
+    } else if (!strcmp (arg, "--do-not-flip")) {
+#ifdef NFLIP
+      do_not_flip = true;
+#else
+      die ("invalid option '%s' (CaDiCaL without 'bool flip (int)')", arg);
+#endif
     } else if (!strcmp (arg, "--one-by-one")) {
       one_by_one = true;
     } else if (*arg == '-')
@@ -412,7 +450,11 @@ int main (int argc, char **argv) {
       for (int idx = 1; idx <= vars; idx++) {
         int lit = solver->val (idx);
         backbone[idx] = lit;
-        solver->phase (-lit); // Set opposite value as default phase.
+
+        // Set opposite value as default phase.  This is only really useful
+        // though if we do not use 'constrain' (with '--one-by-one').
+        //
+        solver->phase (-lit);
       }
 
       try_to_flip_remaining (1);

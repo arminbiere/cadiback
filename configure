@@ -4,7 +4,7 @@ debug=no
 
 usage () {
 cat <<EOF
-usage: configure [-h][-g]
+usage: configure [-h|--help][-g|--debug]
 EOF
 exit 0
 }
@@ -30,13 +30,24 @@ checkfile () {
 
 checkdir "$CADICAL"
 cadicalversion="`cat $CADICAL/VERSION`"
-msg "Using CADICAL='$CADICAL' version '$cadicalversion'"
 
 checkdir "$CADICAL/src"
 checkdir "$CADICAL/build"
 
 checkfile "$CADICAL/src/cadical.hpp"
 checkfile "$CADICAL/build/libcadical.a"
+
+while [ $# -gt 0 ]
+do
+  case $1 in
+    -h|--help) usage;;
+    -g|--debug) debug=yes;;
+    *) die "invalid option '%s' (try '-h')";;
+  esac
+  shift
+done
+
+msg "Using CADICAL='$CADICAL' version '$cadicalversion'"
 
 if [ x"`grep 'bool flip' $CADICAL/src/cadical.hpp`" = x ]
 then
@@ -46,16 +57,6 @@ else
   msg "CaDiCaL supports 'bool flip (int lit)'"
   flip=yes
 fi
-
-while [ $# -gt 0 ]
-do
-  case $1 in
-    -h) usage;;
-    -g) debug=yes;;
-    *) die "invalid option '%s' (try '-h')";;
-  esac
-  shift
-done
 
 if [ x"$CXX" = x ]
 then
