@@ -119,7 +119,7 @@ static void die (const char *fmt, ...) {
 static void dbg (const char *fmt, ...) {
   if (verbosity < INT_MAX)
     return;
-  fputs ("c LOGGING ", stdout);
+  fputs ("c CADIBACK ", stdout);
   va_list ap;
   va_start (ap, fmt);
   vprintf (fmt, ap);
