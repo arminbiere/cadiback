@@ -20,13 +20,14 @@ static const char * usage =
 "  --do-not-flip      do not try to flip values of candidates in models\n"
 #endif
 "  --no-fixed         do not use root-level fixed literal information\n"
-"  --no-phase         do not use set phases (for '--one-by-one')\n"
+"  --no-phase         do not set decision phases (for '--one-by-one')\n"
 "  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
 "  --version          print version and exit\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
 "determined and then printed (unless '-n' is specified).  If no input\n"
-"file is given the formula is read from '<stdin>'.\n"
+"file is given the formula is read from '<stdin>'. All compressed file\n"
+"types supported by 'CaDiCaL' are supported too.\n"
 
 ;
 
