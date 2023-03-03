@@ -302,10 +302,9 @@ static void backbone_variable (int idx) {
     printf ("b %d\n", lit);
     fflush (stdout);
   }
-  if (checker) {
+  if (checker)
     check_backbone (lit);
-    backbones++;
-  }
+  backbones++;
 }
 
 static void backbone_variables (int start) {
