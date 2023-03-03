@@ -47,7 +47,7 @@ static int verbosity;
 // Checker solver to check that backbones are really back-bones.
 //
 static bool check;
-static CaDiCaL::Solver * checker;
+static CaDiCaL::Solver *checker;
 
 // Print backbones by default. Otherwise only produce statistics.
 //
@@ -83,6 +83,9 @@ static volatile double started = -1;
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 static void msg (const char *, ...) __attribute__ ((format (printf, 1, 2)));
+
+static void fatal (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
 
 static void msg (const char *fmt, ...) {
   if (verbosity < 0)
@@ -123,6 +126,17 @@ static void dbg (const char *fmt, ...) {
   va_end (ap);
   fputc ('\n', stdout);
   fflush (stdout);
+}
+
+static void fatal (const char *fmt, ...) {
+  fputs ("cadiback: fatal error: ", stderr);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  fflush (stderr);
+  abort ();
 }
 
 static CaDiCaL::Solver *solver;
@@ -229,7 +243,15 @@ static void check_model (int lit) {
   checker->assume (lit);
   int tmp = checker->solve ();
   if (tmp != 10)
-    die ("checking claimed model for %d failed", lit);
+    fatal ("checking claimed model for %d failed", lit);
+}
+
+static void check_backbone (int lit) {
+  dbg ("checking that there is no model with %d", -lit);
+  checker->assume (-lit);
+  int tmp = checker->solve ();
+  if (tmp != 20)
+    fatal ("checking %d backbone failed", -lit);
 }
 
 static void try_to_flip_remaining (int start) {
@@ -245,7 +267,7 @@ static void try_to_flip_remaining (int start) {
       flipped++;
       changed++;
       if (check)
-	check_model (-lit);
+        check_model (-lit);
     }
   }
 }
@@ -281,13 +303,9 @@ static void backbone_variable (int idx) {
     fflush (stdout);
   }
   if (checker) {
-    dbg ("checking backbone %d", lit);
-    checker->assume (-lit);
-    int tmp = checker->solve ();
-    if (tmp != 20)
-      die ("checking claimed backbone %d failed", lit);
+    check_backbone (lit);
+    backbones++;
   }
-  backbones++;
 }
 
 static void backbone_variables (int start) {
@@ -369,8 +387,9 @@ int main (int argc, char **argv) {
         die ("%s", err);
       if (vars == INT_MAX) {
         die ("can not support 'INT_MAX == %d' variables", vars);
-        // Otherwise 'vars + 1' as well as the idiom 'idx <= vars' does not
-        // work and for simplicity we force having less variables here.
+        // Otherwise 'vars + 1' as well as the idiom 'idx <= vars' does
+        // not work and for simplicity we force having less variables
+        // here.
       }
     }
     msg ("found %d variables", vars);
@@ -390,7 +409,7 @@ int main (int argc, char **argv) {
 
       backbone = new int[vars + 1];
       if (!backbone)
-        die ("out-of-memory allocating backbone array");
+        fatal ("out-of-memory allocating backbone array");
       for (int idx = 1; idx <= vars; idx++) {
         int lit = solver->val (idx);
         backbone[idx] = lit;
@@ -409,35 +428,37 @@ int main (int argc, char **argv) {
           continue;
         }
 
-	{
-	  int tmp = solver->fixed (lit);
+        {
+          int tmp = solver->fixed (lit);
 
-	  if (tmp > 0) {
-	    dbg ("keeping already fixed backbone %d", lit);
-	    backbone_variable (idx);
-	    fixed++;
-	    continue;
-	  }
+          if (tmp > 0) {
+            dbg ("keeping already fixed backbone %d", lit);
+            backbone_variable (idx);
+            fixed++;
+            continue;
+          }
 
-	  if (tmp < 0) {
-	    dbg ("skipping backbone %d candidate as it was fixed", lit);
-	    backbone[idx] = 0;
-	    if (check)
-	      check_model (-lit);
-	    fixed++;
-	    continue;
-	  }
-	}
+          if (tmp < 0) {
+            dbg ("skipping backbone %d candidate as it was fixed", lit);
+            backbone[idx] = 0;
+            if (check)
+              check_model (-lit);
+            fixed++;
+            continue;
+          }
+        }
 
-        // If enabled we use the 'constrain' optimization which assumes the
-        // disjunction of all remaining possible backbone candidate literals
-        // using the 'constrain' API call described in our FMCAD'21 paper.
+        // If enabled we use the 'constrain' optimization which assumes
+        // the disjunction of all remaining possible backbone candidate
+        // literals using the 'constrain' API call described in our
+        // FMCAD'21 paper.
 
         // If the remaining set of backbone candidates are all backbones
         // then only this call is enough to prove that, otherwise without
-        // 'constrain' we need as many solver calls as there are candidates.
-        // This in turned put heavy load on the 'restore' algorithm which in
-        // some instances then ended up taking 99% of the running time.
+        // 'constrain' we need as many solver calls as there are
+        // candidates. This in turned put heavy load on the 'restore'
+        // algorithm which in some instances then ended up taking 99% of
+        // the running time.
 
         if (!one_by_one) {
           int assumed = 0;
@@ -471,7 +492,8 @@ int main (int argc, char **argv) {
             }
           } else {
 
-            dbg ("no other literal besides %d remains a backbone candidate",
+            dbg ("no other literal besides %d remains a backbone "
+                 "candidate",
                  lit);
           }
         }
@@ -501,8 +523,8 @@ int main (int argc, char **argv) {
       }
 
       // We only print 's SATISFIABLE' here which is supposed to indicate
-      // that the run completed.  Otherwise printing it before printing 'b'
-      // lines confuses scripts (and 'zummarize').
+      // that the run completed.  Otherwise printing it before printing
+      // 'b' lines confuses scripts (and 'zummarize').
 
       line ();
       printf ("s SATISFIABLE\n");
