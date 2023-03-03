@@ -6,14 +6,14 @@ static const char * usage =
 "\n"
 "where '<option>' is one of the following\n"
 "\n"
-"  -c                 check that backbones are really backbones\n"
-"  -h                 print this command line option summary\n"
-"  -l                 extensive logging for debugging\n"
-"  -n                 do not print backbone \n"
-"  -q                 disable all messages\n"
-"  -r                 report what the solver is doing\n"
-"  -s                 always print full statistics (not only with '-v')\n"
-"  -v                 increase verbosity\n"
+"  -c | --check       check that backbones are really backbones\n"
+"  -h | --help        print this command line option summary\n"
+"  -l | --logging     extensive logging for debugging\n"
+"  -n | --no-print    do not print backbone \n"
+"  -q | --quiet       disable all messages\n"
+"  -r | --report      report what the solver is doing\n"
+"  -s | --statistics  always print full statistics (not only with '-v')\n"
+"  -v | --verbose     increase verbosity\n"
 "                     (SAT solver verbosity is increased with two '-v')\n"
 "\n"
 #ifndef NFLIP
@@ -53,6 +53,7 @@ static int verbosity;
 //
 static bool check;
 static CaDiCaL::Solver *checker;
+static size_t checked;
 
 // Print backbones by default. Otherwise only produce statistics.
 //
@@ -275,6 +276,7 @@ static void check_model (int lit) {
   dbg ("checking that there is a model with %d", lit);
   checker->assume (lit);
   int tmp = checker->solve ();
+  checked++;
   if (tmp != 10)
     fatal ("checking claimed model for %d failed", lit);
 }
@@ -283,6 +285,7 @@ static void check_backbone (int lit) {
   dbg ("checking that there is no model with %d", -lit);
   checker->assume (-lit);
   int tmp = checker->solve ();
+  checked++;
   if (tmp != 20)
     fatal ("checking %d backbone failed", -lit);
 }
@@ -393,19 +396,19 @@ int main (int argc, char **argv) {
       fputs (VERSION, stdout);
       fputc ('\n', stdout);
       exit (0);
-    } else if (!strcmp (arg, "-c")) {
+    } else if (!strcmp (arg, "-c") || !strcmp (arg, "--check")) {
       check = true;
-    } else if (!strcmp (arg, "-l")) {
+    } else if (!strcmp (arg, "-l") || !strcmp (argc, "--logging")) {
       verbosity = INT_MAX;
-    } else if (!strcmp (arg, "-n")) {
+    } else if (!strcmp (arg, "-n") || !strcmp (argc, "--no-print")) {
       print = false;
-    } else if (!strcmp (arg, "-q")) {
+    } else if (!strcmp (arg, "-q") || !strcmp (argc, "--quiet")) {
       verbosity = -1;
-    } else if (!strcmp (arg, "-r")) {
+    } else if (!strcmp (arg, "-r") || !strcmp (argc, "--report")) {
       report = true;
-    } else if (!strcmp (arg, "-s")) {
+    } else if (!strcmp (arg, "-s") || !strcmp (argc, "--statistics")) {
       always_print_statistics = true;
-    } else if (!strcmp (arg, "-v")) {
+    } else if (!strcmp (arg, "-v") || !strcmp (argc, "--verbose")) {
       if (verbosity < 0)
         verbosity = 1;
       else if (verbosity < INT_MAX)
@@ -513,6 +516,9 @@ int main (int argc, char **argv) {
         }
 
       TRY_SAME_CANDIDATE_AGAIN:
+
+        assert (lit == backbone[idx]);
+	assert (lit);
 
         if (!no_fixed) {
           int tmp = solver->fixed (lit);
@@ -644,8 +650,10 @@ int main (int argc, char **argv) {
     CaDiCaL::Signal::reset ();
   }
   delete solver;
-  if (checker)
+  if (checker) {
+    assert (res == 20 || checked == (size_t) vars);
     delete checker;
+  }
   line ();
   msg ("exit %d", res);
   return res;
