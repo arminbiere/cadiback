@@ -19,6 +19,8 @@ static const char * usage =
 #ifndef NFLIP
 "  --do-not-flip      do not try to flip values of candidates in models\n"
 #endif
+"  --no-fixed         do not use root-level fixed literal information\n"
+"  --no-phase         do not use set phases (for '--one-by-one')\n"
 "  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
 "  --version          print version and exit\n"
 "\n"
@@ -74,6 +76,17 @@ static bool always_print_statistics;
 static bool do_not_flip;
 
 #endif
+
+// The solver can give back information about root-level fixed literals
+// which can cheaply be used to remove candidates or determine backbones.
+//
+static bool no_fixed;
+
+// If '--one-by-one' is set and thus 'constrain' not used it makes sense to
+// the solver to prefer the opposite phase for backbone candidate literals
+// as a model where such a decision was made would allow to drop it.
+//
+static bool no_phase;
 
 // Try each candidate after each other with a single assumption, i.e., do
 // not use the 'constrain' optimization.
@@ -293,7 +306,12 @@ static void check_backbone (int lit) {
 // flipped anymore.  This optimization pays off if on average one literal
 // can be flipped but still is pretty cheap if not.
 
+// As only more recent versions of CaDiCaL (starting with '1.5.4-rc.2')
+// support flipping we keep it under compile time control too (beside
+// allowing to disable it during run-time).
+
 static void try_to_flip_remaining (int start) {
+
   if (do_not_flip)
     return;
 
@@ -469,10 +487,14 @@ int main (int argc, char **argv) {
         int lit = solver->val (idx);
         backbone[idx] = lit;
 
-        // Set opposite value as default phase.  This is only really useful
-        // though if we do not use 'constrain' (with '--one-by-one').
-        //
-        solver->phase (-lit);
+        if (!no_phase) {
+
+          // Set opposite value as default phase.  This is only really
+          // useful though if we do not use 'constrain' (with
+          // '--one-by-one') but we allow it independently anyhow.
+
+          solver->phase (-lit);
+        }
       }
 
       try_to_flip_remaining (1);
@@ -487,7 +509,7 @@ int main (int argc, char **argv) {
           continue;
         }
 
-        {
+        if (!no_fixed) {
           int tmp = solver->fixed (lit);
 
           if (tmp > 0) {
@@ -520,7 +542,9 @@ int main (int argc, char **argv) {
         // the running time.
 
         if (!one_by_one) {
+
           int assumed = 0;
+
           for (int other = idx + 1; other <= vars; other++) {
             int lit_other = backbone[other];
             if (!lit_other)
@@ -528,32 +552,42 @@ int main (int argc, char **argv) {
             solver->constrain (-lit_other);
             assumed++;
           }
-          if (assumed++) {
+
+          if (assumed++) { // At least one other candidate left.
+
+            assert (assumed > 1); // So we have two candidates in total.
+
             solver->constrain (-lit);
             solver->constrain (0);
             dbg ("assuming all %d remaining backbone candidates "
                  "starting with %d",
                  assumed, lit);
+
             int tmp = solve ();
             if (tmp == 10) {
               dbg ("constraining all backbones candidates starting at %d "
                    "all-at-once produced model",
                    lit);
               drop_candidates (idx);
+              assert (!backbone[idx]);
               try_to_flip_remaining (idx + 1);
-            } else {
-              assert (tmp == 20);
-              msg ("all %d remaining candidates starting at %d "
-                   "shown to be backbones in one call",
-                   assumed, lit);
-              backbone_variables (idx);
-              break;
+              continue;
             }
+
+            assert (tmp == 20);
+            msg ("all %d remaining candidates starting at %d "
+                 "shown to be backbones in one call",
+                 assumed, lit);
+            backbone_variables (idx); // Plural!  So all remaining.
+            break;
+
           } else {
 
             dbg ("no other literal besides %d remains a backbone "
                  "candidate",
                  lit);
+
+            // So fall through and continue with assumption below.
           }
         }
 
@@ -565,12 +599,13 @@ int main (int argc, char **argv) {
                "negation %d of backbone candidate %d",
                -lit, lit);
           drop_candidates (idx);
+          assert (!backbone[idx]);
           try_to_flip_remaining (idx + 1);
         } else {
           assert (tmp == 20);
           dbg ("no model with %d thus found backbone literal %d", -lit,
                lit);
-          backbone_variable (idx);
+          backbone_variable (idx); // Singular! So only this one.
         }
       }
 

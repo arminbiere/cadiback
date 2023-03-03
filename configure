@@ -51,7 +51,7 @@ msg "Using CADICAL='$CADICAL' version '$cadicalversion'"
 
 if [ x"`grep 'bool flip' $CADICAL/src/cadical.hpp`" = x ]
 then
-  msg "CaDiCaL does not support 'bool flip (int lit)'"
+  msg "WARNING: your CaDiCaL version does not support 'bool flip (int lit)'"
   flip=no
 else
   msg "CaDiCaL supports 'bool flip (int lit)'"
