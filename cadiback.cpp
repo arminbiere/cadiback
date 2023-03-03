@@ -398,17 +398,17 @@ int main (int argc, char **argv) {
       exit (0);
     } else if (!strcmp (arg, "-c") || !strcmp (arg, "--check")) {
       check = true;
-    } else if (!strcmp (arg, "-l") || !strcmp (argc, "--logging")) {
+    } else if (!strcmp (arg, "-l") || !strcmp (arg, "--logging")) {
       verbosity = INT_MAX;
-    } else if (!strcmp (arg, "-n") || !strcmp (argc, "--no-print")) {
+    } else if (!strcmp (arg, "-n") || !strcmp (arg, "--no-print")) {
       print = false;
-    } else if (!strcmp (arg, "-q") || !strcmp (argc, "--quiet")) {
+    } else if (!strcmp (arg, "-q") || !strcmp (arg, "--quiet")) {
       verbosity = -1;
-    } else if (!strcmp (arg, "-r") || !strcmp (argc, "--report")) {
+    } else if (!strcmp (arg, "-r") || !strcmp (arg, "--report")) {
       report = true;
-    } else if (!strcmp (arg, "-s") || !strcmp (argc, "--statistics")) {
+    } else if (!strcmp (arg, "-s") || !strcmp (arg, "--statistics")) {
       always_print_statistics = true;
-    } else if (!strcmp (arg, "-v") || !strcmp (argc, "--verbose")) {
+    } else if (!strcmp (arg, "-v") || !strcmp (arg, "--verbose")) {
       if (verbosity < 0)
         verbosity = 1;
       else if (verbosity < INT_MAX)
@@ -518,7 +518,7 @@ int main (int argc, char **argv) {
       TRY_SAME_CANDIDATE_AGAIN:
 
         assert (lit == backbone[idx]);
-	assert (lit);
+        assert (lit);
 
         if (!no_fixed) {
           int tmp = solver->fixed (lit);
