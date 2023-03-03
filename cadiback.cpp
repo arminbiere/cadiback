@@ -469,6 +469,7 @@ int main (int argc, char **argv) {
     if (check) {
       checker = new CaDiCaL::Solver ();
       solver->copy (*checker);
+      checker->prefix ("c CHECKER ");
       msg ("generated checker solver as copy of main solver");
     }
     line ();
@@ -504,6 +505,9 @@ int main (int argc, char **argv) {
         // First skip variables that have been dropped as candidates.
 
         int lit = backbone[idx];
+
+RESTART:
+
         if (!lit) {
           dbg ("skipping dropped non-backbone variable %d", idx);
           continue;
@@ -569,8 +573,9 @@ int main (int argc, char **argv) {
                    "all-at-once produced model",
                    lit);
               drop_candidates (idx);
-              assert (!backbone[idx]);
-              try_to_flip_remaining (idx + 1);
+              try_to_flip_remaining (idx);
+	      if (backbone[idx])
+		goto RESTART;
               continue;
             }
 
