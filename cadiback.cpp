@@ -51,7 +51,7 @@ static int verbosity;
 
 // Checker solver to check that backbones are really back-bones.
 //
-static bool check;
+static bool check = true;
 static CaDiCaL::Solver *checker;
 static size_t checked;
 
@@ -96,6 +96,12 @@ static bool one_by_one;
 
 static int vars;      // The number of variables in the CNF.
 static int *backbone; // The backbone candidates (if non-zero).
+
+// The actual incrementally used solver for backbone computation is a global
+// variable such that it can be accessed by the signal handler to print
+// statistics even if execution is interrupted or an error occurs.
+//
+static CaDiCaL::Solver *solver;
 
 static size_t backbones;     // Number of backbones found.
 static size_t dropped;       // Number of non-backbones found.
@@ -170,8 +176,6 @@ static void fatal (const char *fmt, ...) {
   fflush (stderr);
   abort ();
 }
-
-static CaDiCaL::Solver *solver;
 
 static double average (double a, double b) { return b ? a / b : 0; }
 static double percent (double a, double b) { return average (100 * a, b); }
@@ -651,7 +655,14 @@ int main (int argc, char **argv) {
   }
   delete solver;
   if (checker) {
-    assert (res == 20 || checked == (size_t) vars);
+    if (res == 10) {
+      if (checked < (size_t) vars)
+        fatal ("checked %zu literals and not all %d variables", checked,
+               vars);
+      else if (checked > (size_t) vars)
+        fatal ("checked %zu literals thus more than all %d variables",
+               checked, vars);
+    }
     delete checker;
   }
   line ();
