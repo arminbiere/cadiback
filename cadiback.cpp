@@ -58,7 +58,7 @@ static int verbosity;
 
 // Checker solver to check that backbones are really back-bones.
 //
-static bool check = true;
+static bool check;
 static CaDiCaL::Solver *checker;
 static size_t checked;
 
@@ -127,8 +127,8 @@ static size_t flipped; // How often 'solver->flip (lit)' succeeded.
 // Some time profiling information is collected here.
 
 static double first_time, sat_time, unsat_time, solving_time, unknown_time;
-static double satmax_time, unsatmax_time;
-static volatile double started = -1;
+static double satmax_time, unsatmax_time, flip_time;
+static volatile double * started, start_time;
 
 // Declaring these with '__attribute__ ...' gives nice warnings.
 
@@ -197,16 +197,30 @@ static double percent (double a, double b) { return average (100 * a, b); }
 
 static double time () { return CaDiCaL::absolute_process_time (); }
 
+static void start_timer (double * timer) {
+  assert (!started);
+  start_time = time ();
+  started = timer;
+}
+
+static double stop_timer () {
+  assert (started);
+  double * timer = (double*) started;
+  started = 0;
+  double end = time ();
+  double delta = end - start_time;
+  *timer += delta;
+  return delta;
+}
+
 static void statistics () {
   if (verbosity < 0)
     return;
-  if (started >= 0) {
-    double end = time ();
-    double delta = end - started;
-    started = -1;
-    unknown_time += delta;
-    solving_time += delta;
-    unknown_calls++;
+  double total_time = time ();
+  if (started) {
+    if (started == &solving_time)
+      unknown_calls++;
+    stop_timer ();
   }
   printf ("c\n");
   printf ("c --- [ backbone statistics ] ");
@@ -225,24 +239,30 @@ static void statistics () {
   printf ("c\n");
   if (always_print_statistics || verbosity > 0 || first_time)
     printf ("c   %10.2f %6.2f %% first\n", first_time,
-            percent (first_time, solving_time));
+            percent (first_time, total_time));
   if (verbosity > 0 || sat_time)
     printf ("c   %10.2f %6.2f %% sat\n", sat_time,
-            percent (sat_time, solving_time));
+            percent (sat_time, total_time));
   if (verbosity > 0 || satmax_time)
     printf ("c   %10.2f %6.2f %% satmax\n", satmax_time,
-            percent (satmax_time, solving_time));
+            percent (satmax_time, total_time));
   if (verbosity > 0 || unsat_time)
     printf ("c   %10.2f %6.2f %% unsat\n", unsat_time,
-            percent (unsat_time, solving_time));
+            percent (unsat_time, total_time));
   if (verbosity > 0 || unsatmax_time)
     printf ("c   %10.2f %6.2f %% unsatmax\n", unsatmax_time,
-            percent (unsatmax_time, solving_time));
+            percent (unsatmax_time, total_time));
+  if (verbosity > 0 || solving_time)
+    printf ("c   %10.2f %6.2f %% solving\n", solving_time,
+            percent (solving_time, total_time));
+  if (verbosity > 0 || flip_time)
+    printf ("c   %10.2f %6.2f %% flip\n", flip_time,
+            percent (flip_time, total_time));
   if (verbosity > 0 || unknown_time)
     printf ("c   %10.2f %6.2f %% unknown\n", unknown_time,
-            percent (unknown_time, solving_time));
+            percent (unknown_time, total_time));
   printf ("c ====================================\n");
-  printf ("c   %10.2f 100.00 %% solving\n", solving_time);
+  printf ("c   %10.2f 100.00 %% total\n", total_time);
   printf ("c\n");
   printf ("c\n");
   fflush (stdout);
@@ -266,7 +286,7 @@ class CadiBackSignalHandler : public CaDiCaL::Handler {
 
 static int solve () {
   assert (solver);
-  started = time ();
+  start_timer (&solving_time);
   calls++;
   int res = solver->solve ();
   if (res == 10) {
@@ -275,9 +295,7 @@ static int solve () {
     assert (res == 20);
     unsat_calls++;
   }
-  double end = time ();
-  double delta = end - started;
-  started = -1;
+  double delta = stop_timer ();
   if (calls == 1)
     first_time = delta;
   if (res == 10) {
@@ -289,7 +307,6 @@ static int solve () {
     if (delta > unsatmax_time)
       unsatmax_time = delta;
   }
-  solving_time += delta;
   return res;
 }
 
@@ -342,6 +359,8 @@ static void check_backbone (int lit) {
 
 static void try_to_flip_remaining (int start) {
 
+  start_timer (&flip_time);
+
   if (do_not_flip)
     return;
 
@@ -360,6 +379,8 @@ static void try_to_flip_remaining (int start) {
         check_model (-lit);
     }
   }
+
+  stop_timer ();
 }
 
 #else
