@@ -101,8 +101,9 @@ static bool set_phase;
 //
 static bool one_by_one;
 
-static int vars;      // The number of variables in the CNF.
-static int *backbone; // The backbone candidates (if non-zero).
+static int vars;        // The number of variables in the CNF.
+static int *fixed;      // The resulting fixed backbone literals.
+static int *candidates; // The backbone candidates (if non-zero).
 
 // The actual incrementally used solver for backbone computation is a global
 // variable such that it can be accessed by the signal handler to print
@@ -112,13 +113,17 @@ static CaDiCaL::Solver *solver;
 
 // Some statistics are collected here.
 
-static size_t backbones;     // Number of backbones found.
-static size_t dropped;       // Number of non-backbones found.
-static size_t sat_calls;     // Calls with result SAT to SAT solver.
-static size_t unsat_calls;   // Calls with result UNSAT to SAT solver.
-static size_t unknown_calls; // Interrupted solver calls.
-static size_t fixed;         // How often backbones were fixed.
-static size_t calls;         // Calls to SAT solver.
+static struct {
+  size_t backbones; // Number of backbones found.
+  size_t dropped;   // Number of non-backbones found.
+  struct {
+    size_t sat;     // Calls with result SAT to SAT solver.
+    size_t unsat;   // Calls with result UNSAT to SAT solver.
+    size_t unknown; // Interrupted solver calls.
+    size_t total;   // Calls to SAT solver.
+  } calls;
+  size_t fixed; // How often backbones were fixed.
+} statistics;
 
 #ifndef NFLIP
 static size_t flipped; // How often 'solver->flip (lit)' succeeded.
@@ -213,15 +218,15 @@ static double stop_timer () {
   return delta;
 }
 
-static void statistics () {
+static void print_statistics () {
   if (verbosity < 0)
     return;
   double total_time = time ();
-  volatile double * timer = started;
+  volatile double *timer = started;
   if (started) {
     double delta = stop_timer ();
     if (timer == &solving_time) {
-      unknown_calls++;
+      statistics.calls.unknown++;
       unknown_time += delta;
     }
   }
@@ -229,16 +234,20 @@ static void statistics () {
   printf ("c --- [ backbone statistics ] ");
   printf ("------------------------------------------------\n");
   printf ("c\n");
-  printf ("c found %zu backbones %.0f%% (%zu dropped %.0f%%)\n", backbones,
-          percent (backbones, vars), dropped, percent (dropped, vars));
-  printf ("c called SAT solver %zu times (%zu SAT, %zu UNSAT)\n", calls,
-          sat_calls, unsat_calls);
+  printf ("c found %zu backbones %.0f%% (%zu dropped %.0f%%)\n",
+          statistics.backbones, percent (statistics.backbones, vars),
+          statistics.dropped, percent (statistics.dropped, vars));
+  printf ("c called SAT solver %zu times %.0f%% "
+          "(%zu SAT, %zu UNSAT)\n",
+          statistics.calls.total,
+          percent (statistics.calls.total, vars + 1), statistics.calls.sat,
+          statistics.calls.unsat);
 #ifndef NFLIP
   printf ("c successfully flipped %zu literals %.0f%%\n", flipped,
           percent (flipped, vars));
 #endif
-  printf ("c found %zu fixed candidates %.0f%%\n", fixed,
-          percent (fixed, vars));
+  printf ("c found %zu fixed candidates %.0f%%\n", statistics.fixed,
+          percent (statistics.fixed, vars));
   printf ("c\n");
   if (always_print_statistics || verbosity > 0 || first_time)
     printf ("c   %10.2f %6.2f %% first\n", first_time,
@@ -284,7 +293,7 @@ class CadiBackSignalHandler : public CaDiCaL::Handler {
     if (verbosity < 0)
       return;
     printf ("c caught signal %d\n", sig);
-    statistics ();
+    print_statistics ();
   }
 };
 
@@ -293,16 +302,23 @@ class CadiBackSignalHandler : public CaDiCaL::Handler {
 static int solve () {
   assert (solver);
   start_timer (&solving_time);
-  calls++;
+  statistics.calls.total++;
+  if (report || verbosity > 1)
+    line ();
+  if (report || verbosity > 0)
+    msg ("---- [ SAT solver call #%zu ] ------------------------",
+         statistics.calls.total);
+  if (report || verbosity > 1)
+    line ();
   int res = solver->solve ();
   if (res == 10) {
-    sat_calls++;
+    statistics.calls.sat++;
   } else {
     assert (res == 20);
-    unsat_calls++;
+    statistics.calls.unsat++;
   }
   double delta = stop_timer ();
-  if (calls == 1)
+  if (statistics.calls.total == 1)
     first_time = delta;
   if (res == 10) {
     sat_time += delta;
@@ -376,21 +392,21 @@ static void try_to_flip_remaining (int start) {
 
   for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
     for (int idx = start; idx <= vars; idx++) {
-      int lit = backbone[idx];
+      int lit = candidates[idx];
       if (!lit)
         continue;
       if (!solver->flip (lit))
         continue;
       dbg ("flipped value of %d in round %d", lit, round);
-      backbone[idx] = 0;
+      candidates[idx] = 0;
       flipped++;
       changed++;
       if (set_phase)
         solver->unphase (idx);
       if (check) {
-	stop_timer ();
+        stop_timer ();
         check_model (-lit);
-	start_timer (&flip_time);
+        start_timer (&flip_time);
       }
     }
   }
@@ -409,37 +425,41 @@ static void try_to_flip_remaining (int start) {
 // If the SAT solver has a model in which the candidate backbone literal for
 // the given variable index is false, we drop it as a backbone candidate.
 
-static void drop_candidate (int idx) {
-  int lit = backbone[idx];
+static bool drop_candidate (int idx) {
+  int lit = candidates[idx];
   if (!lit)
-    return;
+    return false;
   int val = solver->val (idx);
   if (lit == val)
-    return;
+    return false;
   assert (lit == -val);
   dbg ("model also satisfies negation %d "
        "of backbone candidate %d thus dropping %d",
        -lit, lit, lit);
-  backbone[idx] = 0;
-  dropped++;
+  candidates[idx] = 0;
+  statistics.dropped++;
   if (set_phase)
     solver->unphase (idx);
   if (check)
     check_model (-lit);
+  return true;
 }
 
 // Try dropping as many variables as possible from 'start' to 'vars'.
 
 static void drop_candidates (int start) {
+  unsigned res = 0;
   for (int idx = start; idx <= vars; idx++)
-    drop_candidate (idx);
+    res += drop_candidate (idx);
+  assert (res);
+  (void) res;
 }
 
 // Assume the given variable is a backbone variable with its candidate
 // literal as backbone literal.  Optionally print, check and count it.
 
 static void backbone_variable (int idx) {
-  int lit = backbone[idx];
+  int lit = candidates[idx];
   if (!lit)
     return;
   if (print) {
@@ -448,7 +468,7 @@ static void backbone_variable (int idx) {
   }
   if (checker)
     check_backbone (lit);
-  backbones++;
+  statistics.backbones++;
 }
 
 // Force all variables from 'start' to 'vars' to be backbones unless they
@@ -522,8 +542,8 @@ int main (int argc, char **argv) {
 
   if (verbosity < 0)
     solver->set ("quiet", 1);
-  else if (verbosity > 0)
-    solver->set ("verbose", verbosity - 1);
+  else if (verbosity > 1)
+    solver->set ("verbose", verbosity - 2);
   if (report || verbosity > 1)
     solver->set ("report", 1);
 
@@ -589,15 +609,15 @@ int main (int argc, char **argv) {
       msg ("solver determined first model after %.2f seconds", time ());
       line ();
 
-      backbone = new int[vars + 1];
-      if (!backbone)
+      candidates = new int[vars + 1];
+      if (!candidates)
         fatal ("out-of-memory allocating backbone array");
 
       // Initialize the candidate backbone literals with first model.
 
       for (int idx = 1; idx <= vars; idx++) {
         int lit = solver->val (idx);
-        backbone[idx] = lit;
+        candidates[idx] = lit;
 
         // If enabled by '--set-phase' set opposite value as default
         // decision phase.  This seems to have  negative effects with and
@@ -623,7 +643,7 @@ int main (int argc, char **argv) {
 
         // First skip variables that have been dropped as candidates before.
 
-        int lit = backbone[idx];
+        int lit = candidates[idx];
         if (!lit) {
           dbg ("skipping dropped non-backbone variable %d", idx);
           continue;
@@ -634,7 +654,7 @@ int main (int argc, char **argv) {
 
       TRY_SAME_CANDIDATE_AGAIN:
 
-        assert (lit == backbone[idx]);
+        assert (lit == candidates[idx]);
         assert (lit);
 
         // If not disabled by '--no-fixed' filter root-level fixed literals.
@@ -646,16 +666,16 @@ int main (int argc, char **argv) {
           if (tmp > 0) {
             dbg ("keeping already fixed backbone %d", lit);
             backbone_variable (idx);
-            fixed++;
+            statistics.fixed++;
             continue;
           }
 
           if (tmp < 0) {
             dbg ("skipping backbone %d candidate as it was fixed", lit);
-            backbone[idx] = 0;
+            candidates[idx] = 0;
             if (check)
               check_model (-lit);
-            fixed++;
+            statistics.fixed++;
             continue;
           }
         }
@@ -671,120 +691,125 @@ int main (int argc, char **argv) {
         // Without constrain this puts heavy load on the 'restore' algorithm
         // which in some instances ended up taking 99% of the running time.
 
+#if 0
         if (!one_by_one && last == 20) {
+#else
+        if (!one_by_one) {
+#endif
 
-          int assumed = 0;
+        int assumed = 0;
 
-          for (int other = idx + 1; other <= vars; other++) {
-            int lit_other = backbone[other];
-            if (!lit_other)
-              continue;
-            solver->constrain (-lit_other);
-            assumed++;
-          }
-
-          if (assumed++) { // At least one other candidate left.
-
-            assert (assumed > 1); // So we have two candidates in total.
-
-            solver->constrain (-lit);
-            solver->constrain (0);
-            dbg ("assuming all %d remaining backbone candidates "
-                 "starting with %d",
-                 assumed, lit);
-
-            last = solve ();
-            if (last == 10) {
-              dbg ("constraining all backbones candidates starting at %d "
-                   "all-at-once produced model",
-                   lit);
-              drop_candidates (idx);
-              try_to_flip_remaining (idx);
-
-              lit = backbone[idx];
-              if (lit)
-                goto TRY_SAME_CANDIDATE_AGAIN;
-
-              continue; // ... with next candidate.
-            }
-
-            assert (last == 20);
-            msg ("all %d remaining candidates starting at %d "
-                 "shown to be backbones in one call",
-                 assumed, lit);
-            backbone_variables (idx); // Plural!  So all remaining.
-            break;
-
-          } else {
-
-            dbg ("no other literal besides %d remains a backbone "
-                 "candidate",
-                 lit);
-
-            // ... so fall through and continue with assumption below.
-          }
+        for (int other = idx + 1; other <= vars; other++) {
+          int lit_other = candidates[other];
+          if (!lit_other)
+            continue;
+          if (!no_fixed && solver->fixed (lit_other))
+            continue;
+          solver->constrain (-lit_other);
+          assumed++;
         }
 
-        dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
-        solver->assume (-lit);
-        last = solve ();
-        if (last == 10) {
-          dbg ("found model satisfying single assumed "
-               "negation %d of backbone candidate %d",
-               -lit, lit);
-          drop_candidates (idx);
-          assert (!backbone[idx]);
-          try_to_flip_remaining (idx + 1);
-        } else {
+        if (assumed++) { // At least one other candidate left.
+
+          assert (assumed > 1); // So we have two candidates in total.
+
+          solver->constrain (-lit);
+          solver->constrain (0);
+          dbg ("assuming negation of all %d remaining backbone candidates "
+               "starting with %d",
+               assumed, idx);
+
+          last = solve ();
+          if (last == 10) {
+            dbg ("constraining negation of all %d backbones candidates "
+                 "starting at %d all-at-once produced model",
+                 assumed, idx);
+            drop_candidates (idx);
+            try_to_flip_remaining (idx);
+
+            lit = candidates[idx];
+            if (lit)
+              goto TRY_SAME_CANDIDATE_AGAIN;
+
+            continue; // ... with next candidate.
+          }
+
           assert (last == 20);
-          dbg ("no model with %d thus found backbone literal %d", -lit,
+          msg ("all %d remaining candidates starting at %d "
+               "shown to be backbones in one call",
+               assumed, lit);
+          backbone_variables (idx); // Plural!  So all remaining.
+          break;
+
+        } else {
+
+          dbg ("no other literal besides %d remains a backbone "
+               "candidate",
                lit);
-          backbone_variable (idx); // Singular! So only this one.
+
+          // ... so fall through and continue with assumption below.
         }
       }
 
-      // All backbones found! So terminate the backbone list with 'b 0'.
-
-      if (print) {
-        printf ("b 0\n");
-        fflush (stdout);
+      dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
+      solver->assume (-lit);
+      last = solve ();
+      if (last == 10) {
+        dbg ("found model satisfying single assumed "
+             "negation %d of backbone candidate %d",
+             -lit, lit);
+        drop_candidates (idx);
+        assert (!candidates[idx]);
+        try_to_flip_remaining (idx + 1);
+      } else {
+        assert (last == 20);
+        dbg ("no model with %d thus found backbone literal %d", -lit, lit);
+        backbone_variable (idx); // Singular! So only this one.
       }
+    }
 
-      // We only print 's SATISFIABLE' here which is supposed to indicate
-      // that the run completed.  Otherwise printing it before printing
-      // 'b' lines confuses scripts (and 'zummarize').
+    // All backbones found! So terminate the backbone list with 'b 0'.
 
-      line ();
-      printf ("s SATISFIABLE\n");
+    if (print) {
+      printf ("b 0\n");
       fflush (stdout);
-
-      delete[] backbone;
-
-    } else {
-      assert (res == 20);
-      printf ("s UNSATISFIABLE\n");
     }
-    statistics ();
-    dbg ("deleting solver");
-    CaDiCaL::Signal::reset ();
+
+    // We only print 's SATISFIABLE' here which is supposed to indicate
+    // that the run completed.  Otherwise printing it before printing
+    // 'b' lines confuses scripts (and 'zummarize').
+
+    line ();
+    printf ("s SATISFIABLE\n");
+    fflush (stdout);
+
+    delete[] candidates;
   }
-
-  if (checker) {
-    if (res == 10) {
-      if (checked < (size_t) vars)
-        fatal ("checked %zu literals and not all %d variables", checked,
-               vars);
-      else if (checked > (size_t) vars)
-        fatal ("checked %zu literals thus more than all %d variables",
-               checked, vars);
-    }
-    delete checker;
+  else {
+    assert (res == 20);
+    printf ("s UNSATISFIABLE\n");
   }
+  print_statistics ();
+  dbg ("deleting solver");
+  CaDiCaL::Signal::reset ();
+}
 
-  delete solver;
+if (checker) {
+  if (res == 10) {
+    if (checked < (size_t) vars)
+      fatal ("checked %zu literals and not all %d variables", checked,
+             vars);
+    else if (checked > (size_t) vars)
+      fatal ("checked %zu literals thus more than all %d variables",
+             checked, vars);
+  }
+  delete checker;
+}
 
-  line ();
-  msg ("exit %d", res);
+delete solver;
 
-  return res;
+line ();
+msg ("exit %d", res);
+
+return res;
 }

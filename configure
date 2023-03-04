@@ -42,7 +42,7 @@ do
   case $1 in
     -h|--help) usage;;
     -g|--debug) debug=yes;;
-    *) die "invalid option '%s' (try '-h')";;
+    *) die "invalid option '%1' (try '-h')";;
   esac
   shift
 done
