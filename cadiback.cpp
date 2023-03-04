@@ -246,12 +246,12 @@ static void statistics () {
   if (verbosity > 0 || sat_time)
     printf ("c   %10.2f %6.2f %% sat\n", sat_time,
             percent (sat_time, total_time));
-  if (verbosity > 0 || satmax_time)
-    printf ("c   %10.2f %6.2f %% satmax\n", satmax_time,
-            percent (satmax_time, total_time));
   if (verbosity > 0 || unsat_time)
     printf ("c   %10.2f %6.2f %% unsat\n", unsat_time,
             percent (unsat_time, total_time));
+  if (verbosity > 0 || satmax_time)
+    printf ("c   %10.2f %6.2f %% satmax\n", satmax_time,
+            percent (satmax_time, total_time));
   if (verbosity > 0 || unsatmax_time)
     printf ("c   %10.2f %6.2f %% unsatmax\n", unsatmax_time,
             percent (unsatmax_time, total_time));
@@ -617,6 +617,8 @@ int main (int argc, char **argv) {
       // either drops at least one candidate or determines at least one
       // candidate to be a backbone (or skips already dropped variables).
 
+      int last = 10;
+
       for (int idx = 1; idx <= vars; idx++) {
 
         // First skip variables that have been dropped as candidates before.
@@ -669,7 +671,7 @@ int main (int argc, char **argv) {
         // Without constrain this puts heavy load on the 'restore' algorithm
         // which in some instances ended up taking 99% of the running time.
 
-        if (!one_by_one) {
+        if (!one_by_one && last == 20) {
 
           int assumed = 0;
 
@@ -691,8 +693,8 @@ int main (int argc, char **argv) {
                  "starting with %d",
                  assumed, lit);
 
-            int tmp = solve ();
-            if (tmp == 10) {
+            last = solve ();
+            if (last == 10) {
               dbg ("constraining all backbones candidates starting at %d "
                    "all-at-once produced model",
                    lit);
@@ -706,7 +708,7 @@ int main (int argc, char **argv) {
               continue; // ... with next candidate.
             }
 
-            assert (tmp == 20);
+            assert (last == 20);
             msg ("all %d remaining candidates starting at %d "
                  "shown to be backbones in one call",
                  assumed, lit);
@@ -725,8 +727,8 @@ int main (int argc, char **argv) {
 
         dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
         solver->assume (-lit);
-        int tmp = solve ();
-        if (tmp == 10) {
+        last = solve ();
+        if (last == 10) {
           dbg ("found model satisfying single assumed "
                "negation %d of backbone candidate %d",
                -lit, lit);
@@ -734,7 +736,7 @@ int main (int argc, char **argv) {
           assert (!backbone[idx]);
           try_to_flip_remaining (idx + 1);
         } else {
-          assert (tmp == 20);
+          assert (last == 20);
           dbg ("no model with %d thus found backbone literal %d", -lit,
                lit);
           backbone_variable (idx); // Singular! So only this one.
