@@ -16,12 +16,12 @@ static const char * usage =
 "  -v | --verbose     increase verbosity\n"
 "                     (SAT solver verbosity is increased with two '-v')\n"
 "\n"
-#ifndef NFLIP
-"  --do-not-flip      do not try to flip values of candidates in models\n"
-#endif
 "  --no-fixed         do not use root-level fixed literal information\n"
-"  --no-phase         do not set decision phases (for '--one-by-one')\n"
+#ifndef NFLIP
+"  --no-flip          do not try to flip values of candidates in models\n"
+#endif
 "  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
+"  --set-phase        set decision phases to satisfy negation of candidates\n"
 "  --version          print version and exit\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
@@ -81,7 +81,7 @@ static bool always_print_statistics;
 // which allows to flip values of literals in a given model.  This is
 // cheaper than resetting the SAT solver and calling 'solve ()'.
 //
-static bool do_not_flip;
+static bool no_flip;
 
 #endif
 
@@ -90,11 +90,11 @@ static bool do_not_flip;
 //
 static bool no_fixed;
 
-// If '--one-by-one' is set and thus 'constrain' not used it makes sense to
-// the solver to prefer the opposite phase for backbone candidate literals
-// as a model where such a decision was made would allow to drop it.
+// Force the SAT solver to assign decisions to a value which would make the
+// remaining backbone candidate literals false.  This is a very natural idea
+// but actual had negative effects and thus is now disabled by default.
 //
-static bool no_phase;
+static bool set_phase;
 
 // Try each candidate after each other with a single assumption, i.e., do
 // not use the 'constrain' optimization.
@@ -127,8 +127,8 @@ static size_t flipped; // How often 'solver->flip (lit)' succeeded.
 // Some time profiling information is collected here.
 
 static double first_time, sat_time, unsat_time, solving_time, unknown_time;
-static double satmax_time, unsatmax_time, flip_time;
-static volatile double * started, start_time;
+static double satmax_time, unsatmax_time, flip_time, check_time;
+static volatile double *started, start_time;
 
 // Declaring these with '__attribute__ ...' gives nice warnings.
 
@@ -197,7 +197,7 @@ static double percent (double a, double b) { return average (100 * a, b); }
 
 static double time () { return CaDiCaL::absolute_process_time (); }
 
-static void start_timer (double * timer) {
+static void start_timer (double *timer) {
   assert (!started);
   start_time = time ();
   started = timer;
@@ -205,7 +205,7 @@ static void start_timer (double * timer) {
 
 static double stop_timer () {
   assert (started);
-  double * timer = (double*) started;
+  double *timer = (double *) started;
   started = 0;
   double end = time ();
   double delta = end - start_time;
@@ -217,10 +217,13 @@ static void statistics () {
   if (verbosity < 0)
     return;
   double total_time = time ();
+  volatile double * timer = started;
   if (started) {
-    if (started == &solving_time)
+    double delta = stop_timer ();
+    if (timer == &solving_time) {
       unknown_calls++;
-    stop_timer ();
+      unknown_time += delta;
+    }
   }
   printf ("c\n");
   printf ("c --- [ backbone statistics ] ");
@@ -252,15 +255,18 @@ static void statistics () {
   if (verbosity > 0 || unsatmax_time)
     printf ("c   %10.2f %6.2f %% unsatmax\n", unsatmax_time,
             percent (unsatmax_time, total_time));
+  if (verbosity > 0 || unknown_time)
+    printf ("c   %10.2f %6.2f %% unknown\n", unknown_time,
+            percent (unknown_time, total_time));
   if (verbosity > 0 || solving_time)
     printf ("c   %10.2f %6.2f %% solving\n", solving_time,
             percent (solving_time, total_time));
   if (verbosity > 0 || flip_time)
     printf ("c   %10.2f %6.2f %% flip\n", flip_time,
             percent (flip_time, total_time));
-  if (verbosity > 0 || unknown_time)
-    printf ("c   %10.2f %6.2f %% unknown\n", unknown_time,
-            percent (unknown_time, total_time));
+  if (verbosity > 0 || check_time)
+    printf ("c   %10.2f %6.2f %% check\n", check_time,
+            percent (check_time, total_time));
   printf ("c ====================================\n");
   printf ("c   %10.2f 100.00 %% total\n", total_time);
   printf ("c\n");
@@ -317,21 +323,25 @@ static int solve () {
 // solver after parsing. The first model of the main solver is not checked.
 
 static void check_model (int lit) {
+  start_timer (&check_time);
   dbg ("checking that there is a model with %d", lit);
   checker->assume (lit);
   int tmp = checker->solve ();
   checked++;
   if (tmp != 10)
     fatal ("checking claimed model for %d failed", lit);
+  stop_timer ();
 }
 
 static void check_backbone (int lit) {
+  start_timer (&check_time);
   dbg ("checking that there is no model with %d", -lit);
   checker->assume (-lit);
   int tmp = checker->solve ();
   checked++;
   if (tmp != 20)
     fatal ("checking %d backbone failed", -lit);
+  stop_timer ();
 }
 
 #ifndef NFLIP
@@ -361,7 +371,7 @@ static void try_to_flip_remaining (int start) {
 
   start_timer (&flip_time);
 
-  if (do_not_flip)
+  if (no_flip)
     return;
 
   for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
@@ -375,8 +385,13 @@ static void try_to_flip_remaining (int start) {
       backbone[idx] = 0;
       flipped++;
       changed++;
-      if (check)
+      if (set_phase)
+        solver->unphase (idx);
+      if (check) {
+	stop_timer ();
         check_model (-lit);
+	start_timer (&flip_time);
+      }
     }
   }
 
@@ -407,6 +422,8 @@ static void drop_candidate (int idx) {
        -lit, lit, lit);
   backbone[idx] = 0;
   dropped++;
+  if (set_phase)
+    solver->unphase (idx);
   if (check)
     check_model (-lit);
 }
@@ -472,14 +489,20 @@ int main (int argc, char **argv) {
         verbosity = 1;
       else if (verbosity < INT_MAX)
         verbosity++;
-    } else if (!strcmp (arg, "--do-not-flip")) {
+    } else if (!strcmp (arg, "--no-fixed")) {
+      no_fixed = true;
+    } else if (!strcmp (arg, "--no-flip")) {
 #ifndef NFLIP
-      do_not_flip = true;
+      no_flip = true;
 #else
-      die ("invalid option '%s' (CaDiCaL without 'bool flip (int)')", arg);
+      die ("invalid option '%s' "
+           "(CaDiCaL version does not support 'bool flip (int)')",
+           arg);
 #endif
     } else if (!strcmp (arg, "--one-by-one")) {
       one_by_one = true;
+    } else if (!strcmp (arg, "--set-phase")) {
+      set_phase = true;
     } else if (*arg == '-')
       die ("invalid option '%s' (try '-h')", arg);
     else if (path)
@@ -530,12 +553,29 @@ int main (int argc, char **argv) {
       }
     }
     msg ("found %d variables", vars);
+
+    line ();
     if (check) {
       checker = new CaDiCaL::Solver ();
       solver->copy (*checker);
       checker->prefix ("c CHECKER ");
-      msg ("generated checker solver as copy of main solver");
-    }
+      msg ("checking models with copy of main solver");
+    } else
+      msg ("checking models and backbones disabled");
+    msg ("using root-level fixed literals %s",
+         no_fixed ? "disabled" : "enabled");
+#ifndef NFLIP
+    msg ("trying to flip candidate literals %s",
+         no_flip ? "disabled" : "enabled");
+#endif
+    if (one_by_one)
+      msg ("backbone candidates are checked 'one-by-one' with 'assume'");
+    else
+      msg ("backbone candidates are checked all at once with 'constrain'");
+    if (set_phase)
+      msg ("decision phases are forced to opposite values of candidates");
+    else
+      msg ("decision phases are picked by SAT solver and not forced");
     line ();
 
     // Determine first model or that formula is unsatisfiable.
@@ -559,12 +599,11 @@ int main (int argc, char **argv) {
         int lit = solver->val (idx);
         backbone[idx] = lit;
 
-        // If not disabled by '--no-phase' set opposite value as default
-        // decision phase.  This is only really useful though if we do not
-        // use 'constrain' (with '--one-by-one') but we allow it
-        // independently anyhow.
+        // If enabled by '--set-phase' set opposite value as default
+        // decision phase.  This seems to have  negative effects with and
+        // without using 'constrain' and thus is disabled by default.
 
-        if (!no_phase)
+        if (set_phase)
           solver->phase (-lit);
       }
 
@@ -624,11 +663,11 @@ int main (int argc, char **argv) {
         // possible backbone candidate literals using the 'constrain' API
         // call described in our FMCAD'21 paper.
 
-	// If remaining backbone candidates are all actually backbones then
-	// only this call is enough to prove it. Otherwise without
-	// 'constrain' we need as many solver calls as there are candidates.
-	// Without constrain this puts heavy load on the 'restore' algorithm
-	// which in some instances ended up taking 99% of the running time.
+        // If remaining backbone candidates are all actually backbones then
+        // only this call is enough to prove it. Otherwise without
+        // 'constrain' we need as many solver calls as there are candidates.
+        // Without constrain this puts heavy load on the 'restore' algorithm
+        // which in some instances ended up taking 99% of the running time.
 
         if (!one_by_one) {
 
