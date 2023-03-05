@@ -1,10 +1,12 @@
 #!/bin/sh
 
-. options.sh
+. ./options.sh
 
 for o1 in $options
 do
-  for o2 in $options
+  rest=`echo $options|sed -e s,^.*$o1,,`
+  [ "$rest" = "" ] && break
+  for o2 in $rest
   do
     if [ $o1 = default -a $o2 = default ]
     then
