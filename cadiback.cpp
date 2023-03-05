@@ -13,8 +13,8 @@ static const char * usage =
 "  -q | --quiet       disable all messages\n"
 "  -r | --report      report what the solver is doing\n"
 "  -s | --statistics  always print full statistics (not only with '-v')\n"
-"  -v | --verbose     increase verbosity\n"
-"                     (SAT solver verbosity is increased with two '-v')\n"
+"  -v | --verbose     increase verbosity (SAT solver needs three)\n"
+"  -V | --version     print version and exit\n"
 "\n"
 "  --no-filter        do not filter additional candidates\n"
 "  --no-fixed         do not use root-level fixed literal information\n"
@@ -23,8 +23,7 @@ static const char * usage =
 #endif
 "  --no-inprocessing  disable any preprocessing and inprocessing\n"
 "  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
-"  --set-phase        set decision phases to satisfy negation of candidates\n"
-"  --version          print version and exit\n"
+"  --set-phase        force phases to satisfy negation of candidates\n"
 "\n"
 "  --plain            disable all optimizations, which is the same as:\n"
 "\n"
@@ -628,7 +627,7 @@ int main (int argc, char **argv) {
     if (!strcmp (arg, "-h")) {
       fputs (usage, stdout);
       exit (0);
-    } else if (!strcmp (arg, "--version")) {
+    } else if (!strcmp (arg, "-V") || !strcmp (arg, "--version")) {
       fputs (VERSION, stdout);
       fputc ('\n', stdout);
       exit (0);
