@@ -2,8 +2,17 @@
 
 . ./options.sh
 
+killall run.sh
+killall runcnfuzz
+killall cadiback
+killall cnfdd
+
+sleep 1
+
+killall -9 run.sh
 killall -9 runcnfuzz
-killall -9 cadical
+killall -9 cadiback
+killall -9 cnfdd
 
 for o1 in $options
 do

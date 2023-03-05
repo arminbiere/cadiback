@@ -32,12 +32,11 @@ do
       args=" --$o1 --$o2"
     fi
     dir=${o1}-${o2}
+    [ x"$*" = x ] || args="$args $*"
     echo $dir$args
-    mkdir $dir 2>/dev/null || \
-      die "could not make directory '$dir' (did you run 'make clean' first)"
+    mkdir $dir 2>/dev/null
     cd $dir
+    runcnfuzz -i ../../cadiback$args 1>/dev/null 2>/dev/null &
     cd ..
   done
 done
-
-wait
