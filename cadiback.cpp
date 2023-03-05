@@ -353,15 +353,23 @@ static int solve () {
 // each literal.  The checker solver is copied from the main incremental
 // solver after parsing. The first model of the main solver is not checked.
 
+static void inc_checked () {
+  assert (checker);
+  checked++;
+  char prefix[32];
+  snprintf (prefix, sizeof prefix, "c C%zu ", checked);
+  checker->prefix (prefix);
+}
+
 static void check_model (int lit) {
   double *timer = (double *) started;
   if (timer)
     stop_timer ();
   start_timer (&check_time);
+  inc_checked ();
   dbg ("checking that there is a model with %d", lit);
   checker->assume (lit);
   int tmp = checker->solve ();
-  checked++;
   if (tmp != 10)
     fatal ("checking claimed model for %d failed", lit);
   stop_timer ();
@@ -371,10 +379,10 @@ static void check_model (int lit) {
 
 static void check_backbone (int lit) {
   start_timer (&check_time);
+  inc_checked ();
   dbg ("checking that there is no model with %d", -lit);
   checker->assume (-lit);
   int tmp = checker->solve ();
-  checked++;
   if (tmp != 20)
     fatal ("checking %d backbone failed", -lit);
   stop_timer ();
@@ -638,7 +646,6 @@ int main (int argc, char **argv) {
     if (check) {
       checker = new CaDiCaL::Solver ();
       solver->copy (*checker);
-      checker->prefix ("c CHECKER ");
       msg ("checking models with copy of main solver");
     } else
       msg ("checking models and backbones disabled");
