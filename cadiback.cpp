@@ -148,7 +148,8 @@ static struct {
     size_t total;   // Calls to SAT solver.
   } calls;
 #ifndef NFLIP
-  size_t flipped; // How often 'solver->flip (lit)' succeeded.
+  size_t flipped;   // How often 'solver->flip (lit)' succeeded.
+  size_t flippable; // How often 'solver->flip (lit)' succeeded.
 #endif
 } statistics;
 
@@ -266,6 +267,8 @@ static void print_statistics () {
   printf ("c filtered      %9zu candidates %3.0f%%\n", statistics.filtered,
           percent (statistics.filtered, vars));
 #ifndef NFLIP
+  printf ("c flippable     %9zu candidates %3.0f%%\n", statistics.flippable,
+          percent (statistics.flippable, vars));
   printf ("c flipped       %9zu candidates %3.0f%%\n", statistics.flipped,
           percent (statistics.flipped, vars));
 #endif
@@ -468,6 +471,17 @@ static void try_to_flip_remaining (int start) {
     return;
 
   start_timer (&flip_time);
+
+  for (int idx = start; idx <= vars; idx++) {
+    int lit = candidates[idx];
+    if (!lit)
+      continue;
+    if (!solver->flippable (lit))
+      continue;
+    dbg ("can flip value of %d", lit);
+    statistics.flippable++;
+    drop_candidate (idx);
+  }
 
   for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
     for (int idx = start; idx <= vars; idx++) {
