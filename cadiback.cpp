@@ -56,7 +56,8 @@ static const char * usage =
 
 static int verbosity;
 
-// Checker solver to check that backbones are really back-bones.
+// Checker solver to check that backbones are really back-bones, enabled by
+// '-c' or '--check' (and quite expensive but useful for debugging).
 //
 static bool check;
 static CaDiCaL::Solver *checker;
@@ -103,6 +104,7 @@ static bool one_by_one;
 static int vars;        // The number of variables in the CNF.
 static int *fixed;      // The resulting fixed backbone literals.
 static int *candidates; // The backbone candidates (if non-zero).
+static int *constraint; // Literals to constrain.
 
 // The actual incrementally used solver for backbone computation is a global
 // variable such that it can be accessed by the signal handler to print
@@ -685,6 +687,12 @@ int main (int argc, char **argv) {
       if (!fixed)
         fatal ("out-of-memory allocating backbone result array");
 
+      if (!one_by_one) {
+        constraint = new int[vars];
+        if (!constraint)
+          fatal ("out-of-memory allocating constraint stack");
+      }
+
       // Initialize the candidate backbone literals with first model.
 
       for (int idx = 1; idx <= vars; idx++) {
@@ -746,9 +754,11 @@ int main (int argc, char **argv) {
         // 'restore' algorithm which in some instances ended up taking 99%
         // of the running time.
 
-        if (!one_by_one) { // TODO add back: && last == 20) {
+        if (!one_by_one && last == 20) {
 
           int assumed = 0;
+          assert (assumed < vars);
+          constraint[assumed++] = -lit;
 
           for (int other = idx + 1; other <= vars; other++) {
             int lit_other = candidates[other];
@@ -756,25 +766,24 @@ int main (int argc, char **argv) {
               continue;
             if (!no_fixed && fix_candidate (other))
               continue;
-            solver->constrain (-lit_other);
-            assumed++;
+            assert (assumed < vars);
+            constraint[assumed++] = -lit_other;
           }
 
-          if (assumed++) { // At least one other candidate left.
+          if (assumed > 1) { // At least one other candidate left.
 
-            assert (assumed > 1); // So we have two candidates in total.
+            dbg ("assuming negation of all %d remaining backbone "
+                 "candidates starting with variable %d",
+                 assumed, idx);
 
-            solver->constrain (-lit);
+            for (int i = 0; i != assumed; i++)
+              solver->constrain (constraint[i]);
             solver->constrain (0);
-            dbg (
-                "assuming negation of all %d remaining backbone candidates "
-                "starting with %d",
-                assumed, idx);
 
             last = solve ();
             if (last == 10) {
               dbg ("constraining negation of all %d backbones candidates "
-                   "starting at %d all-at-once produced model",
+                   "starting with variable %d all-at-once produced model",
                    assumed, idx);
               filter_candidates (idx);
               try_to_flip_remaining (idx);
@@ -795,8 +804,8 @@ int main (int argc, char **argv) {
 
           } else {
 
-            dbg ("no other literal besides %d remains a backbone "
-                 "candidate",
+            dbg ("no other literal besides %d "
+                 "remains a backbone candidate",
                  lit);
 
             // ... so fall through and continue with assumption below.
@@ -867,6 +876,9 @@ int main (int argc, char **argv) {
 
       delete[] candidates;
       delete[] fixed;
+
+      if (!one_by_one)
+        delete[] constraint;
 
       if (checker) {
         if (statistics.checked < (size_t) vars)
