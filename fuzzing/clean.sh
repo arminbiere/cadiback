@@ -1,6 +1,6 @@
 #!/bin/sh
 
-. options.sh
+. ./options.sh
 
 killall -9 runcnfuzz
 killall -9 cadical
