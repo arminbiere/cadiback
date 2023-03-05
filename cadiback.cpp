@@ -16,13 +16,24 @@ static const char * usage =
 "  -v | --verbose     increase verbosity\n"
 "                     (SAT solver verbosity is increased with two '-v')\n"
 "\n"
+"  --no-filter        do not filter additional candidates\n"
 "  --no-fixed         do not use root-level fixed literal information\n"
 #ifndef NFLIP
 "  --no-flip          do not try to flip values of candidates in models\n"
 #endif
+"  --no-inprocessing  disable any preprocessing and inprocessing\n"
 "  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
 "  --set-phase        set decision phases to satisfy negation of candidates\n"
 "  --version          print version and exit\n"
+"\n"
+"  --plain            disable all optimizations, which is the same as:\n"
+"\n"
+"                       --no-filter --no-fixed"
+#ifndef NFLIP
+" --no-flip"
+#endif
+"\n"
+"                       --no-inprocessing --one-by-one\n"
 "\n"
 "and '<dimacs>' is a SAT instances for which the backbone literals are\n"
 "determined and then printed (unless '-n' is specified).  If no input\n"
@@ -59,7 +70,7 @@ static int verbosity;
 // Checker solver to check that backbones are really back-bones, enabled by
 // '-c' or '--check' (and quite expensive but useful for debugging).
 //
-static bool check;
+static const char *check;
 static CaDiCaL::Solver *checker;
 
 // Print backbones by default. Otherwise only produce statistics.
@@ -75,20 +86,31 @@ static bool report = false;
 //
 static bool always_print_statistics;
 
+// Do not filter candidates by obtained models.
+//
+static const char *no_filter;
+
 #ifndef NFLIP
 
 // There is an extension of CaDiCaL with the 'bool flip (lit)' API call
 // which allows to flip values of literals in a given model.  This is
 // cheaper than resetting the SAT solver and calling 'solve ()'.
 //
-static bool no_flip;
+static const char *no_flip;
 
 #endif
+
+// Disable filtering of backbones by obtained models.
+//
 
 // The solver can give back information about root-level fixed literals
 // which can cheaply be used to remove candidates or determine backbones.
 //
-static bool no_fixed;
+static const char *no_fixed;
+
+// Disable preprocessing and inprocessing.
+//
+static const char *no_inprocessing;
 
 // Force the SAT solver to assign decisions to a value which would make the
 // remaining backbone candidate literals false.  This is a very natural idea
@@ -99,7 +121,7 @@ static bool set_phase;
 // Try each candidate after each other with a single assumption, i.e., do
 // not use the 'constrain' optimization.
 //
-static bool one_by_one;
+static const char *one_by_one;
 
 static int vars;        // The number of variables in the CNF.
 static int *fixed;      // The resulting fixed backbone literals.
@@ -223,6 +245,7 @@ static double stop_timer () {
 static void print_statistics () {
   if (verbosity < 0)
     return;
+  solver->prefix ("c ");
   double total_time = time ();
   volatile double *timer = started;
   if (started) {
@@ -236,20 +259,31 @@ static void print_statistics () {
   printf ("c --- [ backbone statistics ] ");
   printf ("------------------------------------------------\n");
   printf ("c\n");
-  printf ("c found %zu backbones %.0f%% (%zu filtered %.0f%%)\n",
-          statistics.backbones, percent (statistics.backbones, vars),
-          statistics.filtered, percent (statistics.filtered, vars));
-  printf ("c called SAT solver %zu times %.0f%% "
-          "(%zu SAT, %zu UNSAT)\n",
-          statistics.calls.total,
-          percent (statistics.calls.total, vars + 1), statistics.calls.sat,
-          statistics.calls.unsat);
+  printf ("c found         %9zu backbones  %3.0f%%\n", statistics.backbones,
+          percent (statistics.backbones, vars));
+  printf ("c dropped       %9zu candidates %3.0f%%\n", statistics.dropped,
+          percent (statistics.dropped, vars));
+  printf ("c\n");
+  printf ("c filtered      %9zu candidates %3.0f%%\n", statistics.filtered,
+          percent (statistics.filtered, vars));
 #ifndef NFLIP
-  printf ("c successfully flipped %zu literals %.0f%%\n",
-          statistics.flipped, percent (statistics.flipped, vars));
+  printf ("c flipped       %9zu candidates %3.0f%%\n", statistics.flipped,
+          percent (statistics.flipped, vars));
 #endif
-  printf ("c found %zu fixed candidates %.0f%%\n", statistics.fixed,
+  printf ("c fixed         %9zu candidates %3.0f%%\n", statistics.fixed,
           percent (statistics.fixed, vars));
+  printf ("c\n");
+  printf ("c called solver %9zu times      %3.0f%%\n",
+          statistics.calls.total,
+          percent (statistics.calls.total, vars + 1));
+  printf ("c satisfiable   %9zu times      %3.0f%%\n", statistics.calls.sat,
+          percent (statistics.calls.sat, statistics.calls.total));
+  printf ("c unsatisfiable %9zu times      %3.0f%%\n",
+          statistics.calls.unsat,
+          percent (statistics.calls.unsat, statistics.calls.total));
+  printf ("c\n");
+  printf ("c --- [ backbone profiling ] ");
+  printf ("-------------------------------------------------\n");
   printf ("c\n");
   if (always_print_statistics || verbosity > 0 || first_time)
     printf ("c   %10.2f %6.2f %% first\n", first_time,
@@ -465,6 +499,7 @@ static void try_to_flip_remaining (int start) {
 // the given variable index is false, we drop it as a backbone candidate.
 
 static bool filter_candidate (int idx) {
+  assert (!no_filter);
   int lit = candidates[idx];
   if (!lit)
     return false;
@@ -485,12 +520,47 @@ static bool filter_candidate (int idx) {
 // on the value of the remaining candidates in the current model.
 
 static void filter_candidates (int start) {
+
+  if (no_filter || start > vars)
+    return;
+
   unsigned res = 0;
   for (int idx = start; idx <= vars; idx++)
-    if (filter_candidate (idx))
+    if (filter_candidate (idx), !res)
       res++;
+
   assert (res);
   (void) res;
+}
+
+// Drop the first candidate refuted by the current model and drop it.  In
+// principle we could have merged this logic with 'filter_candidates' but we
+// want to distinguish the one guaranteed dropped candidate if we find a
+// model from the additional ones filtered by the model both with respect to
+// statistics as well as supporting '--no-filter'.
+
+static int drop_first_candidate (int start) {
+  assert (start <= vars);
+  int idx = start, lit = 0, val = 0;
+  for (;; idx++) {
+    assert (idx <= vars);
+    lit = candidates[idx];
+    if (!lit)
+      continue;
+    val = solver->val (idx) < 0 ? -idx : idx; // Legacy support.
+    assert (val == idx || val == -idx);
+    if (lit == -val)
+      break;
+  }
+  assert (lit);
+  assert (lit == -val);
+  assert (idx <= vars);
+  assert (candidates[idx] == lit);
+  dbg ("model satisfies negation %d "
+       "of backbone candidate %d thus dropping %d",
+       -lit, lit, lit);
+  drop_candidate (idx);
+  return idx;
 }
 
 // Assume the given variable is a backbone variable with its candidate
@@ -563,7 +633,7 @@ int main (int argc, char **argv) {
       fputc ('\n', stdout);
       exit (0);
     } else if (!strcmp (arg, "-c") || !strcmp (arg, "--check")) {
-      check = true;
+      check = arg;
     } else if (!strcmp (arg, "-l") || !strcmp (arg, "--logging")) {
       verbosity = INT_MAX;
     } else if (!strcmp (arg, "-n") || !strcmp (arg, "--no-print")) {
@@ -579,20 +649,30 @@ int main (int argc, char **argv) {
         verbosity = 1;
       else if (verbosity < INT_MAX)
         verbosity++;
+    } else if (!strcmp (arg, "--no-filter")) {
+      no_filter = arg;
     } else if (!strcmp (arg, "--no-fixed")) {
-      no_fixed = true;
+      no_fixed = arg;
     } else if (!strcmp (arg, "--no-flip")) {
 #ifndef NFLIP
-      no_flip = true;
+      no_flip = arg;
 #else
       die ("invalid option '%s' "
            "(CaDiCaL version does not support 'bool flip (int)')",
            arg);
 #endif
+    } else if (!strcmp (arg, "--no-inprocessing")) {
+      no_inprocessing = arg;
     } else if (!strcmp (arg, "--one-by-one")) {
-      one_by_one = true;
+      one_by_one = arg;
     } else if (!strcmp (arg, "--set-phase")) {
       set_phase = true;
+    } else if (!strcmp (arg, "--plain")) {
+      no_filter = no_fixed = arg;
+#ifndef NFLIP
+      no_flip = arg;
+#endif
+      no_inprocessing = one_by_one = arg;
     } else if (*arg == '-')
       die ("invalid option '%s' (try '-h')", arg);
     else if (path)
@@ -608,7 +688,51 @@ int main (int argc, char **argv) {
   msg ("Compiled with '%s'", BUILD);
   line ();
 
+  if (check) {
+    checker = new CaDiCaL::Solver ();
+    msg ("checking models with copy of main solver by '%s'", check);
+  } else
+    msg ("not checking models and backbones "
+         "(enable with '--check')");
+
+  if (no_filter)
+    msg ("filtering backbones by models disabled by '%s'", no_filter);
+  else
+    msg ("filtering backbones by models (disable with '--no-filter')");
+
+  if (no_fixed)
+    msg ("using root-level fixed literals disabled by '%s'", no_fixed);
+  else
+    msg ("using root-level fixed literals (disable with '--no-fixed')");
+
+#ifndef NFLIP
+  if (no_flip)
+    msg ("trying to flip candidate literals disabled by '%s'", no_flip);
+  else
+    msg ("trying to flip candidate literals (disable with '--no-flip')");
+#endif
+
+  if (no_inprocessing)
+    msg ("SAT solver inprocessing disabled by '%s'", no_inprocessing);
+  else
+    msg ("SAT solver inprocessing (disable with '--no-inprocessing')");
+
+  if (one_by_one)
+    msg ("backbone candidates checked one-by-one by '%s'", one_by_one);
+  else
+    msg ("backbone candidates checked all-at-once "
+         "(disable with '--one-by-one')");
+
+  if (set_phase)
+    msg ("phases explicitly forced by '--set-phase'");
+  else
+    msg ("phases picked by SAT solver "
+         "(force with '--set-phase')");
+  line ();
+
   solver = new CaDiCaL::Solver ();
+  if (no_inprocessing)
+    solver->set ("inprocessing", 0);
 
   if (verbosity < 0)
     solver->set ("quiet", 1);
@@ -644,34 +768,17 @@ int main (int argc, char **argv) {
     }
     msg ("found %d variables", vars);
 
-    line ();
-    if (check) {
-      checker = new CaDiCaL::Solver ();
-      solver->copy (*checker);
-      msg ("checking models with copy of main solver");
-    } else
-      msg ("checking models and backbones disabled");
-    msg ("using root-level fixed literals %s",
-         no_fixed ? "disabled" : "enabled");
-#ifndef NFLIP
-    msg ("trying to flip candidate literals %s",
-         no_flip ? "disabled" : "enabled");
-#endif
-    if (one_by_one)
-      msg ("backbone candidates are checked 'one-by-one'");
-    else
-      msg ("backbone candidates are checked all at once");
-    if (set_phase)
-      msg ("decision phases are forced to opposite values of candidates");
-    else
-      msg ("decision phases are picked by SAT solver and not forced");
-    line ();
-
     // Determine first model or that formula is unsatisfiable.
 
+    line ();
     msg ("starting solving after %.2f seconds", time ());
     res = solve ();
     assert (res == 10 || res == 20);
+
+    if (checker) {
+      dbg ("copying checker after first model");
+      solver->copy (*checker);
+    }
 
     if (res == 10) {
 
@@ -785,7 +892,8 @@ int main (int argc, char **argv) {
               dbg ("constraining negation of all %d backbones candidates "
                    "starting with variable %d all-at-once produced model",
                    assumed, idx);
-              filter_candidates (idx);
+              int other = drop_first_candidate (idx);
+              filter_candidates (other + 1);
               try_to_flip_remaining (idx);
 
               lit = candidates[idx];
@@ -819,7 +927,8 @@ int main (int argc, char **argv) {
           dbg ("found model satisfying single assumed "
                "negation %d of backbone candidate %d",
                -lit, lit);
-          filter_candidates (idx);
+          drop_candidate (idx);
+          filter_candidates (idx + 1);
           assert (!candidates[idx]);
           try_to_flip_remaining (idx + 1);
         } else {

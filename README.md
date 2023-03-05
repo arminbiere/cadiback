@@ -35,8 +35,8 @@ s SATISFIABLE
 This example shows that exactly the two literals `1` and `-3` are backbones
 and that there are models both with `2` and `-2`, i.e., the variable `2` is
 not a backbone variable.  In general the tool can produce multiple `b` lines
-which in principle can be interleaved with comment lines starting with `c`.
-After the analyzer found all backbones it prints the `b 0` line.
+which are not ordered and can be interleaved with comment lines starting
+with `c`.  After the analyzer found all backbones it prints the `b 0` line.
 
 The backbones are printed as they are found and the output is flushed
 whenever a new backbone is found.  This allows to use the tool in an

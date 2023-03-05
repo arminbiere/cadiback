@@ -1,10 +1,19 @@
 #!/bin/sh
 
 debug=no
+flip=unknown
 
 usage () {
 cat <<EOF
-usage: configure [-h|--help][-g|--debug]
+usage: configure [-h|--help][-g|--debug][--no-flip]
+
+  -h | --help   print this command line option summary
+
+  -g | --debug  print with assertion checking and symbols
+                (cheap as the main work is done in the SAT solver)
+
+  --no-flip     disable flipping with '-DNFLIP' at compile-time
+                (to support old legacy versions of 'CaDiCaL')
 EOF
 exit 0
 }
@@ -42,7 +51,8 @@ do
   case $1 in
     -h|--help) usage;;
     -g|--debug) debug=yes;;
-    *) die "invalid option '%1' (try '-h')";;
+    --no-flip) flip=no;;
+    *) die "invalid option '$1' (try '-h')";;
   esac
   shift
 done
@@ -51,10 +61,11 @@ msg "Using CADICAL='$CADICAL' version '$cadicalversion'"
 
 if [ x"`grep 'bool flip' $CADICAL/src/cadical.hpp`" = x ]
 then
-  msg "WARNING: your CaDiCaL version does not support 'bool flip (int lit)'"
+  [ $flip = no ] || \
+    die "no 'CaDiCaL' support for 'bool flip (int lit)' (update version or use '--no-flip')"
   flip=no
 else
-  msg "CaDiCaL supports 'bool flip (int lit)'"
+  msg "your 'CaDiCaL' version supports 'bool flip (int lit)'"
   flip=yes
 fi
 
