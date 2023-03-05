@@ -472,6 +472,7 @@ static void try_to_flip_remaining (int start) {
 
   start_timer (&flip_time);
 
+  size_t flippable = 0;
   for (int idx = start; idx <= vars; idx++) {
     int lit = candidates[idx];
     if (!lit)
@@ -481,21 +482,41 @@ static void try_to_flip_remaining (int start) {
     dbg ("can flip value of %d", lit);
     statistics.flippable++;
     drop_candidate (idx);
+    flippable++;
   }
 
-  for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
+#if 0
+  if (flippable)
+    for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
+      for (int idx = start; idx <= vars; idx++) {
+        int lit = candidates[idx];
+        if (!lit)
+          continue;
+        if (!solver->flip (lit))
+          continue;
+        dbg ("flipped value of %d in round %d", lit, round);
+        statistics.flipped++;
+        drop_candidate (idx);
+        changed++;
+      }
+      if (round == 2 && changed)
+	fatal ("did not expect this to happen");
+    }
+#else
+
+  if (flippable)
     for (int idx = start; idx <= vars; idx++) {
       int lit = candidates[idx];
       if (!lit)
         continue;
       if (!solver->flip (lit))
         continue;
-      dbg ("flipped value of %d in round %d", lit, round);
+      dbg ("flipped value of %d in round %d", lit);
       statistics.flipped++;
       drop_candidate (idx);
-      changed++;
     }
-  }
+
+#endif
 
   stop_timer ();
 }
