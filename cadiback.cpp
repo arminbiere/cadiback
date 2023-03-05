@@ -421,10 +421,10 @@ static void drop_candidate (int idx) {
 
 static void try_to_flip_remaining (int start) {
 
-  start_timer (&flip_time);
-
   if (no_flip)
     return;
+
+  start_timer (&flip_time);
 
   for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
     for (int idx = start; idx <= vars; idx++) {
@@ -458,7 +458,8 @@ static bool filter_candidate (int idx) {
   int lit = candidates[idx];
   if (!lit)
     return false;
-  int val = solver->val (idx);
+  int val = solver->val (idx) < 0 ? -idx : idx;
+  assert (val == idx || val == -idx);
   if (lit == val)
     return false;
   assert (lit == -val);
@@ -680,7 +681,8 @@ int main (int argc, char **argv) {
       // Initialize the candidate backbone literals with first model.
 
       for (int idx = 1; idx <= vars; idx++) {
-        int lit = solver->val (idx);
+        int lit = solver->val (idx) < 0 ? -idx : idx;
+	assert (lit == idx || lit == -idx);
         candidates[idx] = lit;
         fixed[idx] = 0;
 
@@ -745,7 +747,7 @@ int main (int argc, char **argv) {
             int lit_other = candidates[other];
             if (!lit_other)
               continue;
-            if (!no_fixed && fix_candidate (idx))
+            if (!no_fixed && fix_candidate (other))
               continue;
             solver->constrain (-lit_other);
             assumed++;
