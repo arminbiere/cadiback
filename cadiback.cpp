@@ -60,7 +60,6 @@ static int verbosity;
 //
 static bool check;
 static CaDiCaL::Solver *checker;
-static size_t checked;
 
 // Print backbones by default. Otherwise only produce statistics.
 //
@@ -117,16 +116,17 @@ static struct {
   size_t backbones; // Number of backbones found.
   size_t dropped;   // Number of non-backbones found.
   size_t filtered;  // Number of candidates with two models.
-#ifndef NFLIP
-  size_t flipped; // How often 'solver->flip (lit)' succeeded.
-#endif
-  size_t fixed; // Number of fixed variables.
+  size_t checked;   // How often checked model or backbone.
+  size_t fixed;     // Number of fixed variables.
   struct {
     size_t sat;     // Calls with result SAT to SAT solver.
     size_t unsat;   // Calls with result UNSAT to SAT solver.
     size_t unknown; // Interrupted solver calls.
     size_t total;   // Calls to SAT solver.
   } calls;
+#ifndef NFLIP
+  size_t flipped; // How often 'solver->flip (lit)' succeeded.
+#endif
 } statistics;
 
 // Some time profiling information is collected here.
@@ -355,9 +355,9 @@ static int solve () {
 
 static void inc_checked () {
   assert (checker);
-  checked++;
+  statistics.checked++;
   char prefix[32];
-  snprintf (prefix, sizeof prefix, "c C%zu ", checked);
+  snprintf (prefix, sizeof prefix, "c C%zu ", statistics.checked);
   checker->prefix (prefix);
 }
 
@@ -466,7 +466,7 @@ static bool filter_candidate (int idx) {
   int lit = candidates[idx];
   if (!lit)
     return false;
-  int val = solver->val (idx) < 0 ? -idx : idx;
+  int val = solver->val (idx) < 0 ? -idx : idx; // Legacy support.
   assert (val == idx || val == -idx);
   if (lit == val)
     return false;
@@ -688,8 +688,8 @@ int main (int argc, char **argv) {
       // Initialize the candidate backbone literals with first model.
 
       for (int idx = 1; idx <= vars; idx++) {
-        int lit = solver->val (idx) < 0 ? -idx : idx;
-	assert (lit == idx || lit == -idx);
+        int lit = solver->val (idx) < 0 ? -idx : idx; // Legacy support.
+        assert (lit == idx || lit == -idx);
         candidates[idx] = lit;
         fixed[idx] = 0;
 
@@ -869,12 +869,12 @@ int main (int argc, char **argv) {
       delete[] fixed;
 
       if (checker) {
-        if (checked < (size_t) vars)
-          fatal ("checked %zu literals and not all %d variables", checked,
-                 vars);
-        else if (checked > (size_t) vars)
+        if (statistics.checked < (size_t) vars)
+          fatal ("checked %zu literals and not all %d variables",
+                 statistics.checked, vars);
+        else if (statistics.checked > (size_t) vars)
           fatal ("checked %zu literals thus more than all %d variables",
-                 checked, vars);
+                 statistics.checked, vars);
         delete checker;
       }
 
