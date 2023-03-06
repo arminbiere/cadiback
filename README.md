@@ -1,4 +1,4 @@
-# CaDiBack BackBone Analyzer
+# CaDiBack BackBone Extractor
 
 This is a tool using the [CaDiCaL](https://github.com/arminbiere/cadical)
 solver to determine the backbone of a satisfiable instance, which are those
@@ -36,11 +36,11 @@ This example shows that exactly the two literals `1` and `-3` are backbones
 and that there are models both with `2` and `-2`, i.e., the variable `2` is
 not a backbone variable.  In general the tool can produce multiple `b` lines
 which are not ordered and can be interleaved with comment lines starting
-with `c`.  After the analyzer found all backbones it prints the `b 0` line.
+with `c`.  After the extractor found all backbones it prints the `b 0` line.
 
 The backbones are printed as they are found and the output is flushed
 whenever a new backbone is found.  This allows to use the tool in an
 any-time fashion.  Without the `-q` option more comment lines are printed
 before, between and after the backbone section, and with higher verbosity or
 reporting enabled even in between 'b' lines.  If the given CNF is
-unsatisfiable the analyzer prints 's UNSATISFIABLE' instead at the end.
+unsatisfiable the extractor prints 's UNSATISFIABLE' instead at the end.

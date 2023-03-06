@@ -9,9 +9,9 @@ static const char * usage =
 "  -c | --check       check that backbones are really backbones\n"
 "  -h | --help        print this command line option summary\n"
 "  -l | --logging     extensive logging for debugging\n"
-"  -n | --no-print    do not print backbone \n"
+"  -n | --no-print    do not print backbone\n"
 "  -q | --quiet       disable all messages\n"
-"  -r | --report      report what the solver is doing\n"
+"  -r | --report      report what the SAT solver is doing\n"
 "  -s | --statistics  always print full statistics (not only with '-v')\n"
 "  -v | --verbose     increase verbosity (SAT solver needs three)\n"
 "  -V | --version     print version and exit\n"
@@ -715,7 +715,7 @@ int main (int argc, char **argv) {
       path = arg;
   }
 
-  msg ("CadiBack BackBone Analyzer");
+  msg ("CadiBack BackBone Extractor");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
   msg ("Version " VERSION " " GITID);
   msg ("CaDiCaL %s %s", CaDiCaL::version (), CaDiCaL::identifier ());
