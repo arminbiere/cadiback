@@ -502,7 +502,6 @@ static void try_to_flip_remaining (int start) {
       if (round == 2 && changed)
 	fatal ("did not expect this to happen");
     }
-#else
 
   if (flippable)
     for (int idx = start; idx <= vars; idx++) {
@@ -514,6 +513,7 @@ static void try_to_flip_remaining (int start) {
       dbg ("flipped value of %d in round %d", lit);
       statistics.flipped++;
       drop_candidate (idx);
+	fatal ("did not expect this to happen");
     }
 
 #endif
