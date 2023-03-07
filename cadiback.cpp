@@ -7,6 +7,7 @@ static const char * usage =
 "where '<option>' is one of the following:\n"
 "\n"
 "  -c | --check       check that backbones are really backbones\n"
+"  -f | --force       force writing backbone to CNF alike path\n"
 "  -h | --help        print this command line option summary\n"
 "  -l | --logging     extensive logging for debugging\n"
 "  -n | --no-print    do not print backbone\n"
@@ -48,6 +49,7 @@ static const char * usage =
 // clang-format on
 
 #include <cassert>
+#include <cctype>
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
@@ -75,6 +77,10 @@ static int verbosity;
 //
 static const char *check;
 static CaDiCaL::Solver *checker;
+
+// Force writing to CNF alike output file.
+//
+static const char *force;
 
 // Print backbones by default. Otherwise only produce statistics.
 //
@@ -670,6 +676,43 @@ static void backbone_variables (int start) {
   (void) count;
 }
 
+// Want to make sure not to overwrite accidentally (without '--force') files
+// which look like CNF files (as this happened to me all the time).
+
+static bool match_until_dot (const char *str, const char *pattern) {
+  assert (str);
+  assert (pattern);
+  const char *p = str, *q = pattern;
+  while (*q) {
+    if (tolower (*p) != tolower (*q))
+      return false;
+    p++, q++;
+  }
+  return !*p || *p == '.';
+}
+
+static bool looks_like_a_dimacs_file (const char *path) {
+  const char *dots[2] = {0, 0};
+  char ch;
+  for (const char *p = path; (ch = *p); p++)
+    if (ch == '.')
+      dots[0] = dots[1], dots[1] = p + 1;
+
+  const char *suffix = dots[1];
+  if (!suffix)
+    return false;
+
+  if (match_until_dot (suffix, "gz") || match_until_dot (suffix, "bz2") ||
+      match_until_dot (suffix, "xz") || match_until_dot (suffix, "lzma"))
+    suffix = dots[0];
+
+  if (!suffix)
+    return false;
+
+  return match_until_dot (suffix, "dimacs") ||
+         match_until_dot (suffix, "cnf");
+}
+
 int main (int argc, char **argv) {
 
   for (int i = 1; i != argc; i++) {
@@ -683,6 +726,8 @@ int main (int argc, char **argv) {
       exit (0);
     } else if (!strcmp (arg, "-c") || !strcmp (arg, "--check")) {
       check = arg;
+    } else if (!strcmp (arg, "-f") || !strcmp (arg, "--force")) {
+      force = arg;
     } else if (!strcmp (arg, "-l") || !strcmp (arg, "--logging")) {
       verbosity = INT_MAX;
     } else if (!strcmp (arg, "-n") || !strcmp (arg, "--no-print")) {
@@ -733,9 +778,16 @@ int main (int argc, char **argv) {
       files.dimacs.path = arg;
   }
 
-  if (files.backbone.path && no_print)
-    die ("writing backbone to '%s' and '%s' does not make sense",
-         files.backbone.path, no_print);
+  if (files.backbone.path) {
+    if (no_print)
+      die ("writing backbone to '%s' and '%s' does not make sense",
+           files.backbone.path, no_print);
+    if (!force && looks_like_a_dimacs_file (files.backbone.path))
+      die ("will not write to CNF alike backbone file '%s' "
+           "without '--force'",
+           files.backbone.path);
+  } else if (force)
+    die ("'%s' does not make sense without backbone file argument", force);
 
   msg ("CadiBack BackBone Extractor");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
