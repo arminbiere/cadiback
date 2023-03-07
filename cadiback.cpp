@@ -23,9 +23,10 @@ static const char * usage =
 "  --no-flip          do not try to flip values of candidates in models\n"
 #endif
 "  --no-inprocessing  disable any preprocessing and inprocessing\n"
-"  --one-by-one       try each candidate one-by-one (do not use 'constrain')\n"
+"  --one-by-one       try candidates one-by-one (do not use 'constrain')\n"
 "  --set-phase        force phases to satisfy negation of candidates\n"
 "\n"
+"  --default          set optimization options to the default\n"
 "  --plain            disable all optimizations, which is the same as:\n"
 "\n"
 "                       --no-filter --no-fixed"
@@ -502,14 +503,14 @@ static void try_to_flip_remaining (int start) {
       continue;
     if (!solver->flippable (lit))
       continue;
-    dbg ("can flip value of %d", lit);
+    dbg ("literal %d can be flipped", lit);
     statistics.flippable++;
     drop_candidate (idx);
     flippable++;
   }
 
-#if 0
   if (flippable)
+
     for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
       for (int idx = start; idx <= vars; idx++) {
         int lit = candidates[idx];
@@ -517,29 +518,16 @@ static void try_to_flip_remaining (int start) {
           continue;
         if (!solver->flip (lit))
           continue;
-        dbg ("flipped value of %d in round %d", lit, round);
+        dbg ("flipped value of literal %d in round %d", lit, round);
         statistics.flipped++;
         drop_candidate (idx);
         changed++;
+	fatal ("did not expect to find flippable literal in first round");
       }
+
       if (round == 2 && changed)
-	fatal ("did not expect this to happen");
+	fatal ("did not expect to find flippable literal in second round");
     }
-
-  if (flippable)
-    for (int idx = start; idx <= vars; idx++) {
-      int lit = candidates[idx];
-      if (!lit)
-        continue;
-      if (!solver->flip (lit))
-        continue;
-      dbg ("flipped value of %d in round %d", lit);
-      statistics.flipped++;
-      drop_candidate (idx);
-	fatal ("did not expect this to happen");
-    }
-
-#endif
 
   stop_timer ();
 }
@@ -761,12 +749,16 @@ int main (int argc, char **argv) {
       one_by_one = arg;
     } else if (!strcmp (arg, "--set-phase")) {
       set_phase = true;
+    } else if (!strcmp (arg, "--default")) {
+      no_filter = no_fixed = no_inprocessing = one_by_one = 0;
+#ifndef NFLIP
+      no_flip = 0;
+#endif
     } else if (!strcmp (arg, "--plain")) {
-      no_filter = no_fixed = arg;
+      no_filter = no_fixed = no_inprocessing = one_by_one = arg;
 #ifndef NFLIP
       no_flip = arg;
 #endif
-      no_inprocessing = one_by_one = arg;
     } else if (arg[0] == '-' && arg[1])
       die ("invalid option '%s' (try '-h')", arg);
     else if (files.backbone.path)
