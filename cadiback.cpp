@@ -509,6 +509,7 @@ static void try_to_flip_remaining (int start) {
     flippable++;
   }
 
+#if 0
   if (flippable)
 
     for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
@@ -528,6 +529,9 @@ static void try_to_flip_remaining (int start) {
       if (round == 2 && changed)
 	fatal ("did not expect to find flippable literal in second round");
     }
+#else
+  (void) flippable;
+#endif
 
   stop_timer ();
 }
