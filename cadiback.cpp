@@ -137,6 +137,7 @@ static int vars;        // The number of variables in the CNF.
 static int *fixed;      // The resulting fixed backbone literals.
 static int *candidates; // The backbone candidates (if non-zero).
 static int *constraint; // Literals to constrain.
+static int *flippable;  // Flippable/rotatable literals.
 
 // Here we have the files on which the tool operators. The first file
 // argument is the '<dimacs>' if specified. Otherwise we will use '<stdin>'.
@@ -496,38 +497,36 @@ static void try_to_flip_remaining (int start) {
 
   start_timer (&flip_time);
 
-  size_t flippable = 0;
-  for (int idx = start; idx <= vars; idx++) {
-    int lit = candidates[idx];
-    if (!lit)
-      continue;
-    if (!solver->flippable (lit))
-      continue;
-    dbg ("literal %d can be flipped", lit);
-    statistics.flippable++;
-    drop_candidate (idx);
-    flippable++;
-  }
+  size_t found_flippable = 0, tried_to_flip = 0;
+  bool flipped = true;
 
-  if (flippable)
+  for (size_t round = 1; flipped; round++) {
 
-    for (size_t round = 1, changed = 1; changed; round++, changed = 0) {
-      for (int idx = start; idx <= vars; idx++) {
-        int lit = candidates[idx];
-        if (!lit)
-          continue;
-        if (!solver->flip (lit))
-          continue;
-        dbg ("flipped value of literal %d in round %d", lit, round);
+    for (int idx = start; idx <= vars; idx++) {
+      int lit = candidates[idx];
+      if (!lit)
+        continue;
+      if (!solver->flippable (lit))
+        continue;
+      dbg ("literal %d can be flipped in round %zu", lit, round);
+      statistics.flippable++;
+      drop_candidate (idx);
+      assert (found_flippable < (size_t) vars);
+      flippable[found_flippable++] = idx;
+    }
+
+    flipped = false;
+    while (!flipped && found_flippable < tried_to_flip) {
+      int idx = flippable[tried_to_flip++];
+      assert (!candidate[idx]);
+      flipped = solver->flip (idx);
+      dbg ("flipped value of literal %d in round %zu", idx, round);
+      if (flipped) {
         statistics.flipped++;
         drop_candidate (idx);
-        changed++;
-	fatal ("did not expect to find flippable literal in first round");
       }
-
-      if (round == 2 && changed)
-	fatal ("did not expect to find flippable literal in second round");
     }
+  }
 
   stop_timer ();
 }
@@ -911,6 +910,12 @@ int main (int argc, char **argv) {
           fatal ("out-of-memory allocating constraint stack");
       }
 
+      if (!no_flip) {
+	flippable = new int[vars];
+        if (!flippable)
+          fatal ("out-of-memory allocating flippable stack");
+      }
+
       // Initialize the candidate backbone literals with first model.
 
       for (int idx = 1; idx <= vars; idx++) {
@@ -1099,6 +1104,9 @@ int main (int argc, char **argv) {
 
       if (!one_by_one)
         delete[] constraint;
+
+      if (!no_flip)
+        delete[] flippable;
 
       if (checker) {
         if (statistics.checked < (size_t) vars)
