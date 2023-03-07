@@ -502,10 +502,16 @@ static void try_to_flip_remaining (int start) {
 
   for (size_t round = 1; flipped; round++) {
 
+    bool found_candidate = false;
+
     for (int idx = start; idx <= vars; idx++) {
       int lit = candidates[idx];
       if (!lit)
         continue;
+      if (!found_candidate) {
+	found_candidate = true;
+	start= idx;
+      }
       if (!solver->flippable (lit))
         continue;
       dbg ("literal %d can be flipped in round %zu", lit, round);
@@ -516,15 +522,13 @@ static void try_to_flip_remaining (int start) {
     }
 
     flipped = false;
-    while (!flipped && found_flippable < tried_to_flip) {
+    while (!flipped && tried_to_flip < found_flippable) {
       int idx = flippable[tried_to_flip++];
       assert (!candidate[idx]);
       flipped = solver->flip (idx);
       dbg ("flipped value of literal %d in round %zu", idx, round);
-      if (flipped) {
+      if (flipped)
         statistics.flipped++;
-        drop_candidate (idx);
-      }
     }
   }
 
