@@ -2,9 +2,9 @@
 
 static const char * usage =
 
-"usage: cadiback [ <option> ... ] [ <dimacs> ]\n"
+"usage: cadiback [ <option> ... ] [ <dimacs> [ <backbone> ] ]\n"
 "\n"
-"where '<option>' is one of the following\n"
+"where '<option>' is one of the following:\n"
 "\n"
 "  -c | --check       check that backbones are really backbones\n"
 "  -h | --help        print this command line option summary\n"
@@ -34,10 +34,14 @@ static const char * usage =
 "\n"
 "                       --no-inprocessing --one-by-one\n"
 "\n"
-"and '<dimacs>' is a SAT instances for which the backbone literals are\n"
-"determined and then printed (unless '-n' is specified).  If no input\n"
-"file is given the formula is read from '<stdin>'. All compressed file\n"
-"types supported by 'CaDiCaL' are supported too.\n"
+
+"The first argument '<dimacs>' is a formula in DIMACS format for which\n"
+"the backbone is determined and then printed (unless '-n' is specified).\n"
+"If a second file argument '<backbone>' is given it specifies a file\n"
+"to which the backbones are written.  If no file argument is given the\n"
+"formula is read from '<stdin>'.  The same can be achieved by using '-'\n"
+"as first argument. For reading all compressed file types supported by\n"
+"'CaDiCaL' are supported.\n"
 
 ;
 
@@ -74,7 +78,7 @@ static CaDiCaL::Solver *checker;
 
 // Print backbones by default. Otherwise only produce statistics.
 //
-static bool print = true;
+static const char *no_print;
 
 // Disable by default  printing those 'c <character> ...' lines
 // in the solver.  If enabled is useful to see what is going on.
@@ -127,7 +131,19 @@ static int *fixed;      // The resulting fixed backbone literals.
 static int *candidates; // The backbone candidates (if non-zero).
 static int *constraint; // Literals to constrain.
 
-static FILE *bfile = NULL; // file for writing backbone literals 
+// Here we have the files on which the tool operators. The first file
+// argument is the '<dimacs>' if specified. Otherwise we will use '<stdin>'.
+// If a second argument is specified we write the backbones to that file
+// instead of printing them on '<stdout>'.
+
+struct {
+  struct {
+    bool close;
+    FILE *file;
+    const char *path;
+  } dimacs, backbone;
+} files;
+
 // The actual incrementally used solver for backbone computation is a global
 // variable such that it can be accessed by the signal handler to print
 // statistics even if execution is interrupted or an error occurs.
@@ -607,16 +623,10 @@ static bool backbone_variable (int idx) {
     return false;
   fixed[idx] = lit;
   candidates[idx] = 0;
-  if (print && bfile == NULL) {
-    printf ("b %d\n", lit);
-    fflush (stdout);
+  if (!no_print) {
+    fprintf (files.backbone.file, "b %d\n", lit);
+    fflush (files.backbone.file);
   }
-  
-  if (bfile!=NULL) {
-    fprintf (bfile,"b %d\n",lit);
-    fflush (bfile);
-  }
-  
   if (checker)
     check_backbone (lit);
   assert (statistics.backbones < (size_t) vars);
@@ -662,8 +672,6 @@ static void backbone_variables (int start) {
 
 int main (int argc, char **argv) {
 
-  const char *path = 0; // The path to the input file.
-
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h")) {
@@ -678,7 +686,7 @@ int main (int argc, char **argv) {
     } else if (!strcmp (arg, "-l") || !strcmp (arg, "--logging")) {
       verbosity = INT_MAX;
     } else if (!strcmp (arg, "-n") || !strcmp (arg, "--no-print")) {
-      print = false;
+      no_print = arg;
     } else if (!strcmp (arg, "-q") || !strcmp (arg, "--quiet")) {
       verbosity = -1;
     } else if (!strcmp (arg, "-r") || !strcmp (arg, "--report")) {
@@ -714,22 +722,20 @@ int main (int argc, char **argv) {
       no_flip = arg;
 #endif
       no_inprocessing = one_by_one = arg;
-    }
-    else if(!strncmp (arg, "--bfile=", 8)) {
-      const char* bfile_path = arg + 8;
-      bfile = fopen(bfile_path,"w");
-      if(bfile == NULL) {
-      	printf("%s is not a valid file path!\n", bfile_path);   
-      	exit(1);             
-      }
-    }
-    else if (*arg == '-')
+    } else if (arg[0] == '-' && arg[1])
       die ("invalid option '%s' (try '-h')", arg);
-    else if (path)
-      die ("multiple file arguments '%s' and '%s'", path, arg);
+    else if (files.backbone.path)
+      die ("too many arguments '%s', '%s' and '%s'", files.dimacs.path,
+           files.backbone.path, arg);
+    else if (files.dimacs.path)
+      files.backbone.path = arg;
     else
-      path = arg;
+      files.dimacs.path = arg;
   }
+
+  if (files.backbone.path && no_print)
+    die ("writing backbone to '%s' and '%s' does not make sense",
+         files.backbone.path, no_print);
 
   msg ("CadiBack BackBone Extractor");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
@@ -737,6 +743,17 @@ int main (int argc, char **argv) {
   msg ("CaDiCaL %s %s", CaDiCaL::version (), CaDiCaL::identifier ());
   msg ("Compiled with '%s'", BUILD);
   line ();
+
+  if (files.backbone.path && strcmp (files.backbone.path, "-")) {
+    if (!(files.backbone.file = fopen (files.backbone.path, "w")))
+      die ("can not write backbone to '%s'", files.backbone.path);
+    files.backbone.close = true;
+  } else {
+    files.backbone.file = stdout;
+    files.backbone.path = "<stdout>";
+    assert (!files.backbone.close);
+  }
+  msg ("writing backbones to '%s'", files.backbone.path);
 
   if (check) {
     checker = new CaDiCaL::Solver ();
@@ -798,9 +815,9 @@ int main (int argc, char **argv) {
     dbg ("initialized solver");
     {
       const char *err;
-      if (path) {
-        msg ("reading from '%s'", path);
-        err = solver->read_dimacs (path, vars);
+      if (files.dimacs.path && strcmp (files.dimacs.path, "-")) {
+        msg ("reading from '%s'", files.dimacs.path);
+        err = solver->read_dimacs (files.dimacs.path, vars);
       } else {
         msg ("reading from '<stdin>");
         err = solver->read_dimacs (stdin, "<stdin>", vars);
@@ -991,9 +1008,9 @@ int main (int argc, char **argv) {
 
       // All backbones found! So terminate the backbone list with 'b 0'.
 
-      if (print) {
-        printf ("b 0\n");
-        fflush (stdout);
+      if (!no_print) {
+        fprintf (files.backbone.file, "b 0\n");
+        fflush (files.backbone.file);
       }
 
       // We only print 's SATISFIABLE' here which is supposed to indicate
@@ -1002,11 +1019,6 @@ int main (int argc, char **argv) {
 
       line ();
       printf ("s SATISFIABLE\n");
-      if(bfile !=NULL) {
-        fflush (bfile);
-        fclose(bfile);
-      }
-      
       fflush (stdout);
 
 #ifndef NDEBUG
@@ -1057,10 +1069,11 @@ int main (int argc, char **argv) {
     } else {
       assert (res == 20);
       printf ("s UNSATISFIABLE\n");
-      if(bfile !=NULL) {
-        fclose(bfile);
-      }
     }
+
+    if (files.backbone.close)
+      fclose (files.backbone.file);
+
     print_statistics ();
     dbg ("deleting solver");
     CaDiCaL::Signal::reset ();
