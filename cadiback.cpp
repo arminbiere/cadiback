@@ -127,6 +127,7 @@ static int *fixed;      // The resulting fixed backbone literals.
 static int *candidates; // The backbone candidates (if non-zero).
 static int *constraint; // Literals to constrain.
 
+static FILE *bfile = NULL; // file for writing backbone literals 
 // The actual incrementally used solver for backbone computation is a global
 // variable such that it can be accessed by the signal handler to print
 // statistics even if execution is interrupted or an error occurs.
@@ -606,10 +607,16 @@ static bool backbone_variable (int idx) {
     return false;
   fixed[idx] = lit;
   candidates[idx] = 0;
-  if (print) {
+  if (print && bfile == NULL) {
     printf ("b %d\n", lit);
     fflush (stdout);
   }
+  
+  if (bfile!=NULL) {
+    fprintf (bfile,"b %d\n",lit);
+    fflush (bfile);
+  }
+  
   if (checker)
     check_backbone (lit);
   assert (statistics.backbones < (size_t) vars);
@@ -707,7 +714,16 @@ int main (int argc, char **argv) {
       no_flip = arg;
 #endif
       no_inprocessing = one_by_one = arg;
-    } else if (*arg == '-')
+    }
+    else if(!strncmp (arg, "--bfile=", 8)) {
+      const char* bfile_path = arg + 8;
+      bfile = fopen(bfile_path,"w");
+      if(bfile == NULL) {
+      	printf("%s is not a valid file path!\n", bfile_path);   
+      	exit(1);             
+      }
+    }
+    else if (*arg == '-')
       die ("invalid option '%s' (try '-h')", arg);
     else if (path)
       die ("multiple file arguments '%s' and '%s'", path, arg);
@@ -986,6 +1002,11 @@ int main (int argc, char **argv) {
 
       line ();
       printf ("s SATISFIABLE\n");
+      if(bfile !=NULL) {
+        fflush (bfile);
+        fclose(bfile);
+      }
+      
       fflush (stdout);
 
 #ifndef NDEBUG
@@ -1036,6 +1057,9 @@ int main (int argc, char **argv) {
     } else {
       assert (res == 20);
       printf ("s UNSATISFIABLE\n");
+      if(bfile !=NULL) {
+        fclose(bfile);
+      }
     }
     print_statistics ();
     dbg ("deleting solver");
