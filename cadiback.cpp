@@ -114,9 +114,6 @@ static const char *really_flip; // Also actually flip flippable.
 
 #endif
 
-// Disable filtering of backbones by obtained models.
-//
-
 // The solver can give back information about root-level fixed literals
 // which can cheaply be used to remove candidates or determine backbones.
 //
