@@ -26,6 +26,7 @@ static const char * usage =
 "  --no-inprocessing  disable any preprocessing and inprocessing\n"
 "  --one-by-one       try candidates one-by-one (do not use 'constrain')\n"
 "  --set-phase        force phases to satisfy negation of candidates\n"
+"  --chunking         increase constraint size by factor 10 if successful\n"
 "\n"
 "  --default          set optimization options to the default\n"
 "  --plain            disable all optimizations, which is the same as:\n"
@@ -133,6 +134,13 @@ static bool set_phase;
 // not use the 'constrain' optimization.
 //
 static const char *one_by_one;
+
+// If we use constraints ('one-by-one' is off) then we might want to limit
+// the size of the constraints.  On success (solver returns 'unsatisfiable')
+// we increase the constraint size by factor of 10 and on failure (solver
+// finds a model) we reset constraint size to '1'.
+//
+static const char *chunking;
 
 static int vars;        // The number of variables in the CNF.
 static int *fixed;      // The resulting fixed backbone literals.
@@ -641,11 +649,14 @@ static bool fix_candidate (int idx) {
 // Force all variables from 'start' to 'vars' to be backbones unless they
 // were already dropped.  This is used for 'constrain'.
 
-static void backbone_variables (int start) {
-  size_t count = 0;
-  for (int idx = start; idx <= vars; idx++)
+static void backbone_variables (int assumed) {
+  int count = 0;
+  for (int i = 0; i != assumed; i++) {
+    int lit = constraint[i];
+    int idx = abs (lit);
     if (backbone_variable (idx))
       count++;
+  }
   assert (count);
   (void) count;
 }
@@ -738,6 +749,8 @@ int main (int argc, char **argv) {
       no_inprocessing = arg;
     } else if (!strcmp (arg, "--one-by-one")) {
       one_by_one = arg;
+    } else if (!strcmp (arg, "--chunking")) {
+      chunking = arg;
     } else if (!strcmp (arg, "--set-phase")) {
       set_phase = true;
     } else if (!strcmp (arg, "--default")) {
@@ -772,10 +785,13 @@ int main (int argc, char **argv) {
   } else if (force)
     die ("'%s' does not make sense without backbone file argument", force);
 
+  if (one_by_one && chunking)
+    die ("'%s' does not make sense with '%s'", chunking, one_by_one);
+
 #ifndef NFLIP
   if (no_flip && really_flip)
-    die ("'%s' does not make sense in combination with '%s'",
-         really_flip, no_flip);
+    die ("'%s' does not make sense in combination with '%s'", really_flip,
+         no_flip);
 #endif
 
   msg ("CadiBack BackBone Extractor");
@@ -871,8 +887,8 @@ int main (int argc, char **argv) {
         die ("%s", err);
 
       // Computing 'vars + 1' as well as the idiom 'idx <= vars' in 'for'
-      // loops requires 'vars' to be less than 'INT_MAX' to avoid overflows.
-      // For simplicity we force having less variables here.
+      // loops requires 'vars' to be less than 'INT_MAX' to avoid
+      // overflows. For simplicity we force having less variables here.
       //
       if (vars == INT_MAX) {
         die ("can not support 'INT_MAX == %d' variables", vars);
@@ -933,30 +949,34 @@ int main (int argc, char **argv) {
 
       try_to_flip_remaining (1);
 
-      // Now go over all variables in turn and check whether they still are
-      // candidates for being a backbone variables.  Each step of this loop
-      // either drops at least one candidate or determines at least one
-      // candidate to be a backbone (or skips already dropped variables).
+      // Now go over all variables in turn and check whether they still
+      // are candidates for being a backbone variables.  Each step of this
+      // loop either drops at least one candidate or determines at least
+      // one candidate to be a backbone (or skips already dropped
+      // variables).
 
-      int last = 10;
+      int last = 10, chunk = INT_MAX;
 
       for (int idx = 1; idx <= vars; idx++) {
 
-        // First skip variables that have been dropped as candidates before.
+        // First skip variables that have been dropped as candidates
+        // before.
 
         int lit = candidates[idx];
         if (!lit)
           continue;
 
-        // With 'constrain' we might drop another literal but not 'idx' and
-        // in that case simply restart checking 'idx' for being a candidate.
+        // With 'constrain' we might drop another literal but not 'idx'
+        // and in that case simply restart checking 'idx' for being a
+        // candidate.
 
       TRY_SAME_CANDIDATE_AGAIN:
 
         assert (lit == candidates[idx]);
         assert (lit);
 
-        // If not disabled by '--no-fixed' filter root-level fixed literals.
+        // If not disabled by '--no-fixed' filter root-level fixed
+        // literals.
 
         if (!no_fixed && fix_candidate (idx))
           continue;
@@ -973,8 +993,16 @@ int main (int argc, char **argv) {
         // 'restore' algorithm which in some instances ended up taking 99%
         // of the running time.
 
+        if (!one_by_one && chunking) {
+          if (last == 20)
+            chunk = (INT_MAX < chunk) ? INT_MAX : 10 * chunk;
+          else
+            chunk = 1;
+        }
+
         if (!one_by_one && last == 20) {
 
+          assert (chunk > 1);
           int assumed = 0;
           assert (assumed < vars);
           constraint[assumed++] = -lit;
@@ -987,11 +1015,14 @@ int main (int argc, char **argv) {
               continue;
             assert (assumed < vars);
             constraint[assumed++] = -lit_other;
+
+            if (assumed == chunk)
+              break;
           }
 
           if (assumed > 1) { // At least one other candidate left.
 
-            dbg ("assuming negation of all %d remaining backbone "
+            dbg ("assuming negation of %d remaining backbone "
                  "candidates starting with variable %d",
                  assumed, idx);
 
@@ -1001,7 +1032,7 @@ int main (int argc, char **argv) {
 
             last = solve ();
             if (last == 10) {
-              dbg ("constraining negation of all %d backbones candidates "
+              dbg ("constraining negation of %d backbones candidates "
                    "starting with variable %d all-at-once produced model",
                    assumed, idx);
               int other = drop_first_candidate (idx);
@@ -1016,11 +1047,11 @@ int main (int argc, char **argv) {
             }
 
             assert (last == 20);
-            msg ("all %d remaining candidates starting at %d "
+            msg ("%d remaining candidates starting at %d "
                  "shown to be backbones in one call",
                  assumed, lit);
-            backbone_variables (idx); // Plural!  So all remaining.
-            break;
+            backbone_variables (assumed); // Plural!  So all assumed.
+            continue;
 
           } else {
 
