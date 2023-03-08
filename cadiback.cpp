@@ -524,7 +524,7 @@ static void try_to_flip_remaining (int start) {
     flipped = false;
     while (!flipped && tried_to_flip < found_flippable) {
       int idx = flippable[tried_to_flip++];
-      assert (!candidate[idx]);
+      assert (!candidates[idx]);
       flipped = solver->flip (idx);
       dbg ("flipped value of literal %d in round %zu", idx, round);
       if (flipped)
