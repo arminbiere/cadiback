@@ -20,7 +20,8 @@ static const char * usage =
 "  --no-filter        do not filter additional candidates\n"
 "  --no-fixed         do not use root-level fixed literal information\n"
 #ifndef NFLIP
-"  --no-flip          do not try to flip values of candidates in models\n"
+"  --no-flip          do not try to find flippable candidates in models\n"
+"  --really-flip      actually flip flippable candidates in models\n"
 #endif
 "  --no-inprocessing  disable any preprocessing and inprocessing\n"
 "  --one-by-one       try candidates one-by-one (do not use 'constrain')\n"
@@ -102,11 +103,14 @@ static const char *no_filter;
 
 #ifndef NFLIP
 
-// There is an extension of CaDiCaL with the 'bool flip (lit)' API call
-// which allows to flip values of literals in a given model.  This is
-// cheaper than resetting the SAT solver and calling 'solve ()'.
+// There is an extension of CaDiCaL with 'bool flippable (int lit)' and
+// 'bool flip (lit)' API calls which allow check whether a literal can be
+// flipped in the given model without falsifying the formula.  The first
+// 'flippable' function only checks this and 'flip' actually does it.
+// We can use both to remove backbone candidates.
 //
-static const char *no_flip;
+static const char *no_flip;     // No use of flippable information.
+static const char *really_flip; // Also actually flip flippable.
 
 #endif
 
@@ -137,7 +141,6 @@ static int vars;        // The number of variables in the CNF.
 static int *fixed;      // The resulting fixed backbone literals.
 static int *candidates; // The backbone candidates (if non-zero).
 static int *constraint; // Literals to constrain.
-static int *flippable;  // Flippable/rotatable literals.
 
 // Here we have the files on which the tool operators. The first file
 // argument is the '<dimacs>' if specified. Otherwise we will use '<stdin>'.
@@ -469,22 +472,22 @@ static void drop_candidate (int idx) {
 
 #ifndef NFLIP
 
-// This is the technique first implemented in 'Kitten' for SAT sweeping
-// within 'Kissat', which tries to flip the value in a model of the formula
-// without making the formula false.  It goes over the watches of the
-// literal and checks if all watched clauses are double satisfied and also
-// replaces watches if the second satisfying literal is not watched.
+// This is a technique first implemented in 'Kitten' for SAT sweeping within
+// 'Kissat', which checks whether it is possible to flip the value of a
+// literal in a model of the formula without making the formula false.  It
+// goes over the watches of the literal and checks if all watched clauses
+// are double satisfied.
 
-// This requires support by 'CaDiCaL' via the 'bool flip (int lit)'
-// function, which is slightly more expensive than the one in 'Kitten' as in
-// essence it is compatible with blocking literals (used in 'CaDiCaL' but
-// not in 'Kitten').  The first attempt to 'flip' a literal will need to
-// propagate all the assigned literals and find replacement watches while
-// ignoring blocking literals.
+// This requires support by 'CaDiCaL' via the 'bool flippable (int lit)' or
+// 'bool flip (int lit)' functions function, which is slightly more
+// expensive than the one in 'Kitten' as in essence it is compatible with
+// blocking literals (used in 'CaDiCaL' but not in 'Kitten').  The first
+// check for flipping a literal will need to propagate all the assigned
+// literals and find replacement watches while ignoring blocking literals.
 
-// We to flip all remaining backbone candidate literals until none can be
-// flipped anymore.  This optimization pays off if on average one literal
-// can be flipped but still is pretty cheap if not.
+// We check all remaining backbone candidate literals until none can be
+// flipped anymore.  This optimization pays off if on average close to one
+// literal can be flipped but still is pretty cheap if not.
 
 // As only more recent versions of CaDiCaL (starting with '1.5.4-rc.2')
 // support flipping we keep it under compile time control too (beside
@@ -497,39 +500,22 @@ static void try_to_flip_remaining (int start) {
 
   start_timer (&flip_time);
 
-  size_t found_flippable = 0, tried_to_flip = 0;
-  bool flipped = true;
-
-  for (size_t round = 1; flipped; round++) {
-
-    bool found_candidate = false;
-
-    for (int idx = start; idx <= vars; idx++) {
-      int lit = candidates[idx];
-      if (!lit)
+  for (int idx = start; idx <= vars; idx++) {
+    int lit = candidates[idx];
+    if (!lit)
+      continue;
+    if (really_flip) {
+      if (!solver->flip (lit))
         continue;
-      if (!found_candidate) {
-	found_candidate = true;
-	start= idx;
-      }
+      dbg ("flipped literal %d", lit);
+      statistics.flipped++;
+    } else {
       if (!solver->flippable (lit))
         continue;
-      dbg ("literal %d can be flipped in round %zu", lit, round);
+      dbg ("literal %d can be flipped", lit);
       statistics.flippable++;
-      drop_candidate (idx);
-      assert (found_flippable < (size_t) vars);
-      flippable[found_flippable++] = idx;
     }
-
-    flipped = false;
-    while (!flipped && tried_to_flip < found_flippable) {
-      int idx = flippable[tried_to_flip++];
-      assert (!candidates[idx]);
-      flipped = solver->flip (idx);
-      dbg ("flipped value of literal %d in round %zu", idx, round);
-      if (flipped)
-        statistics.flipped++;
-    }
+    drop_candidate (idx);
   }
 
   stop_timer ();
@@ -742,9 +728,14 @@ int main (int argc, char **argv) {
 #ifndef NFLIP
       no_flip = arg;
 #else
-      die ("invalid option '%s' "
-           "(CaDiCaL version does not support 'bool flip (int)')",
-           arg);
+    NO_CADICAL_SUPPORT_FOR_FLIPPING:
+      die ("invalid option '%s' (CaDiCaL does not support flipping)" arg);
+#endif
+    } else if (!strcmp (arg, "--really-flip")) {
+#ifndef NFLIP
+      really_flip = arg;
+#else
+      goto NO_CADICAL_SUPPORT_FOR_FLIPPING;
 #endif
     } else if (!strcmp (arg, "--no-inprocessing")) {
       no_inprocessing = arg;
@@ -784,6 +775,12 @@ int main (int argc, char **argv) {
   } else if (force)
     die ("'%s' does not make sense without backbone file argument", force);
 
+#ifndef NFLIP
+  if (no_flip && really_flip)
+    die ("'%s' does not make sense in combination with '%s'",
+         really_flip, no_flip);
+#endif
+
   msg ("CadiBack BackBone Extractor");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
   msg ("Version " VERSION " " GITID);
@@ -821,9 +818,13 @@ int main (int argc, char **argv) {
 
 #ifndef NFLIP
   if (no_flip)
-    msg ("trying to flip candidate literals disabled by '%s'", no_flip);
+    msg ("trying to use flippable literals disabled by '%s'", no_flip);
   else
-    msg ("trying to flip candidate literals (disable with '--no-flip')");
+    msg ("trying to use flippable literals (disable with '--no-flip')");
+  if (really_flip)
+    msg ("will actually flip flippable literals by '%s'", really_flip);
+  else
+    msg ("only dropping flippable candidates without flipping them");
 #endif
 
   if (no_inprocessing)
@@ -912,12 +913,6 @@ int main (int argc, char **argv) {
         constraint = new int[vars];
         if (!constraint)
           fatal ("out-of-memory allocating constraint stack");
-      }
-
-      if (!no_flip) {
-	flippable = new int[vars];
-        if (!flippable)
-          fatal ("out-of-memory allocating flippable stack");
       }
 
       // Initialize the candidate backbone literals with first model.
@@ -1108,9 +1103,6 @@ int main (int argc, char **argv) {
 
       if (!one_by_one)
         delete[] constraint;
-
-      if (!no_flip)
-        delete[] flippable;
 
       if (checker) {
         if (statistics.checked < (size_t) vars)
