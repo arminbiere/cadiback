@@ -829,6 +829,11 @@ int main (int argc, char **argv) {
     msg ("not checking models and backbones "
          "(enable with '--check')");
 
+  if (no_constrain)
+    msg ("using 'constrain' interface disabled by '%s'", no_constrain);
+  else
+    msg ("using 'constrain' interface (disable with '--no-constrain')");
+
   if (no_filter)
     msg ("filtering backbones by models disabled by '%s'", no_filter);
   else
@@ -844,6 +849,7 @@ int main (int argc, char **argv) {
     msg ("trying to use flippable literals disabled by '%s'", no_flip);
   else
     msg ("trying to use flippable literals (disable with '--no-flip')");
+
   if (really_flip)
     msg ("will actually flip flippable literals by '%s'", really_flip);
   else
