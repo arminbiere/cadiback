@@ -17,6 +17,7 @@ static const char * usage =
 "  -v | --verbose     increase verbosity (SAT solver needs three)\n"
 "  -V | --version     print version and exit\n"
 "\n"
+"  --no-constraint    use activation literals instead of 'constrain'\n"
 "  --no-filter        do not filter additional candidates\n"
 "  --no-fixed         do not use root-level fixed literal information\n"
 #ifndef NFLIP
@@ -97,6 +98,10 @@ static bool report = false;
 // From command line option '-s'.
 //
 static bool always_print_statistics;
+
+// Use activation literals instead of 'constrain' API call.
+//
+static const char *no_constrain;
 
 // Do not filter candidates by obtained models.
 //
@@ -728,6 +733,8 @@ int main (int argc, char **argv) {
         verbosity = 1;
       else if (verbosity < INT_MAX)
         verbosity++;
+    } else if (!strcmp (arg, "--no-constrain")) {
+      no_constrain = arg;
     } else if (!strcmp (arg, "--no-filter")) {
       no_filter = arg;
     } else if (!strcmp (arg, "--no-fixed")) {
@@ -787,6 +794,9 @@ int main (int argc, char **argv) {
 
   if (one_by_one && chunking)
     die ("'%s' does not make sense with '%s'", chunking, one_by_one);
+
+  if (one_by_one && no_constrain)
+    die ("'%s' does not make sense with '%s'", no_constrain, one_by_one);
 
 #ifndef NFLIP
   if (no_flip && really_flip)
@@ -955,7 +965,7 @@ int main (int argc, char **argv) {
       // one candidate to be a backbone (or skips already dropped
       // variables).
 
-      int last = 10, chunk = INT_MAX;
+      int last = 10, chunk = INT_MAX, activation_variable = vars;
 
       for (int idx = 1; idx <= vars; idx++) {
 
@@ -1026,9 +1036,19 @@ int main (int argc, char **argv) {
                  "candidates starting with variable %d",
                  assumed, idx);
 
-            for (int i = 0; i != assumed; i++)
-              solver->constrain (constraint[i]);
-            solver->constrain (0);
+            if (no_constrain) {
+              for (int i = 0; i != assumed; i++)
+                solver->constrain (constraint[i]);
+              solver->constrain (0);
+            } else {
+              activation_variable++;
+              dbg ("new activation variable %s", activation_variable);
+              solver->add (activation_variable);
+              for (int i = 0; i != assumed; i++)
+                solver->add (constraint[i]);
+              solver->add (0);
+              solver->assume (-activation_variable);
+            }
 
             last = solve ();
             if (last == 10) {
@@ -1038,6 +1058,14 @@ int main (int argc, char **argv) {
               int other = drop_first_candidate (idx);
               filter_candidates (other + 1);
               try_to_flip_remaining (idx);
+            }
+
+            if (no_constrain) {
+              solver->add (activation_variable);
+              solver->add (0);
+            }
+
+            if (last == 10) {
 
               lit = candidates[idx];
               if (lit)
