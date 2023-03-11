@@ -20,6 +20,9 @@ do
   for o2 in $rest
   do
     [ $o1 = "one-by-one" -a $o2 = "no-constrain" ] && continue
+    [ $o1 = "one-by-one" -a $o2 = "chunking" ] && continue
+    [ $o1 = "no-flip" -a $o2 = "really-flip" ] && continue
+
     if [ $o1 = default -a $o2 = default ]
     then
       args=""
