@@ -19,6 +19,7 @@ do
   [ "$rest" = "" ] && break
   for o2 in $rest
   do
+    [ $o1 = "one-by-one" -a $o2 = "no-constrain" ] && continue
     if [ $o1 = default -a $o2 = default ]
     then
       args=""
