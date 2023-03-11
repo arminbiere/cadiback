@@ -1011,7 +1011,7 @@ int main (int argc, char **argv) {
 
         if (!one_by_one && chunking) {
           if (last == 20)
-            chunk = (INT_MAX < chunk) ? INT_MAX : 10 * chunk;
+            chunk = (chunk < INT_MAX/10) ? 10 * chunk : INT_MAX;
           else
             chunk = 1;
         }
