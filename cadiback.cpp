@@ -17,7 +17,7 @@ static const char * usage =
 "  -v | --verbose     increase verbosity (SAT solver needs three)\n"
 "  -V | --version     print version and exit\n"
 "\n"
-"  --no-constraint    use activation literals instead of 'constrain'\n"
+"  --no-constrain     use activation literals instead of 'constrain'\n"
 "  --no-filter        do not filter additional candidates\n"
 "  --no-fixed         do not use root-level fixed literal information\n"
 #ifndef NFLIP
