@@ -1043,10 +1043,6 @@ int main (int argc, char **argv) {
                  assumed, idx);
 
             if (no_constrain) {
-              for (int i = 0; i != assumed; i++)
-                solver->constrain (constraint[i]);
-              solver->constrain (0);
-            } else {
               activation_variable++;
               dbg ("new activation variable %s", activation_variable);
               solver->add (activation_variable);
@@ -1054,7 +1050,11 @@ int main (int argc, char **argv) {
                 solver->add (constraint[i]);
               solver->add (0);
               solver->assume (-activation_variable);
-            }
+            } else {
+              for (int i = 0; i != assumed; i++)
+                solver->constrain (constraint[i]);
+              solver->constrain (0);
+	    }
 
             last = solve ();
             if (last == 10) {
