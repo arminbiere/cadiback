@@ -4,7 +4,7 @@ cadiback: cadiback.o ../cadical/build/libcadical.a makefile
 	$(COMPILE) -o $@ $< -L../cadical/build -lcadical
 cadiback.o: cadiback.cpp config.hpp ../cadical/src/cadical.hpp makefile
 	$(COMPILE) -c $< -I../cadical/src
-config.hpp: generate makefile
+config.hpp: generate VERSION makefile
 	./generate > $@
 format:
 	clang-format -i cadiback.cpp
