@@ -25,9 +25,11 @@ static const char * usage =
 "  --really-flip      actually flip flippable candidates in models\n"
 #endif
 "  --no-inprocessing  disable any preprocessing and inprocessing\n"
+"\n"
+"  --chunking         increase constraint size by factor 10 if successful\n"
+"  --cores            use core based algorithm as preprocessing step\n"
 "  --one-by-one       try candidates one-by-one (do not use 'constrain')\n"
 "  --set-phase        force phases to satisfy negation of candidates\n"
-"  --chunking         increase constraint size by factor 10 if successful\n"
 "\n"
 "  --default          set optimization options to the default\n"
 "  --plain            disable all optimizations, which is the same as:\n"
@@ -147,10 +149,25 @@ static const char *one_by_one;
 //
 static const char *chunking;
 
+// If the following option is enabled we try to compute cores as in
+// 'MiniBones', which assumes the conjunction of the complement of
+// all the remaining backbone candidates.  If solving under this
+// assumption is satisfiable all the backbones which were assumed
+// negatively are not backbones.  Otherwise if it is unsatisfiable
+// (the expected case) we check the failed literal among the assumptions,
+// aka the (literal) core of the query.  If that core has one element
+// its negation is fixed and a backbone literal. Otherwise we remove
+// from the set of assumed assumptions the core literals and try again until
+// the set of assumptions becomes empty, in which case we fall back
+// to the iterative algorithms.
+//
+static const char *cores;
+
 static int vars;        // The number of variables in the CNF.
 static int *fixed;      // The resulting fixed backbone literals.
 static int *candidates; // The backbone candidates (if non-zero).
 static int *constraint; // Literals to constrain.
+static int *core;       // Remaining core literals.
 
 // Here we have the files on which the tool operators. The first file
 // argument is the '<dimacs>' if specified. Otherwise we will use '<stdin>'.
@@ -179,6 +196,8 @@ static struct {
   size_t filtered;  // Number of candidates with two models.
   size_t checked;   // How often checked model or backbone.
   size_t fixed;     // Number of fixed variables.
+  size_t failed;    // Failed literals during core based approach.
+  size_t core;      // Set by core based approach.
   struct {
     size_t sat;     // Calls with result SAT to SAT solver.
     size_t unsat;   // Calls with result UNSAT to SAT solver.
@@ -312,6 +331,10 @@ static void print_statistics () {
 #endif
   printf ("c fixed         %9zu candidates %3.0f%%\n", statistics.fixed,
           percent (statistics.fixed, vars));
+  printf ("c core          %9zu candidates %3.0f%%\n", statistics.core,
+          percent (statistics.core, vars));
+  printf ("c failed        %9zu candidates %3.0f%%\n", statistics.failed,
+          percent (statistics.failed, vars));
   printf ("c\n");
   printf ("c called solver %9zu times      %3.0f%%\n",
           statistics.calls.total,
@@ -756,6 +779,8 @@ int main (int argc, char **argv) {
       no_inprocessing = arg;
     } else if (!strcmp (arg, "--one-by-one")) {
       one_by_one = arg;
+    } else if (!strcmp (arg, "--cores")) {
+      cores = arg;
     } else if (!strcmp (arg, "--chunking")) {
       chunking = arg;
     } else if (!strcmp (arg, "--set-phase")) {
@@ -828,6 +853,11 @@ int main (int argc, char **argv) {
   } else
     msg ("not checking models and backbones "
          "(enable with '--check')");
+
+  if (cores)
+    msg ("using core base preprocessing by '%s'", cores);
+  else
+    msg ("core based preprocessing disabled (enable with '--cores')");
 
   if (no_constrain)
     msg ("using 'constrain' interface disabled by '%s'", no_constrain);
@@ -944,6 +974,12 @@ int main (int argc, char **argv) {
           fatal ("out-of-memory allocating constraint stack");
       }
 
+      if (cores) {
+        core = new int[vars];
+        if (!core)
+          fatal ("out-of-memory allocating literal core stack");
+      }
+
       // Initialize the candidate backbone literals with first model.
 
       for (int idx = 1; idx <= vars; idx++) {
@@ -971,7 +1007,10 @@ int main (int argc, char **argv) {
       // one candidate to be a backbone (or skips already dropped
       // variables).
 
-      int last = 10, chunk = INT_MAX, activation_variable = vars;
+      int activation_variable = vars; // New variables if '--no-contrain'.
+      int constraint_limit = INT_MAX; // Adapted dynamically using 'last'.
+      int core_limit = 100;           // TODO make this configurable.
+      int last = 10;                  // Last solver result.
 
       for (int idx = 1; idx <= vars; idx++) {
 
@@ -984,7 +1023,7 @@ int main (int argc, char **argv) {
 
         // With 'constrain' we might drop another literal but not 'idx'
         // and in that case simply restart checking 'idx' for being a
-        // candidate.
+        // candidate (same applies if 'cores' are enabled).
 
       TRY_SAME_CANDIDATE_AGAIN:
 
@@ -997,28 +1036,143 @@ int main (int argc, char **argv) {
         if (!no_fixed && fix_candidate (idx))
           continue;
 
-        // If not disabled through '--one-by-one' use the 'constrain'
-        // optimization which assumes the disjunction of all remaining
-        // possible backbone candidate literals using the 'constrain' API
-        // call described in our FMCAD'21 paper.
+        if (cores) {
 
-        // If remaining backbone candidates are all actually backbones
-        // then only this call is enough to prove it. Otherwise without
-        // 'constrain' we need as many solver calls as there are
-        // candidates. Without constrain this puts heavy load on the
-        // 'restore' algorithm which in some instances ended up taking 99%
-        // of the running time.
+          assert (core_limit > 1);
+          int assumed = 0;
+
+          assert (assumed < vars);
+          core[assumed++] = -lit;
+
+          for (int other = idx + 1; other <= vars; other++) {
+            int lit_other = candidates[other];
+            if (!lit_other)
+              continue;
+            if (!no_fixed && fix_candidate (other))
+              continue;
+            assert (assumed < vars);
+            core[assumed++] = -lit_other;
+
+            if (assumed == core_limit)
+              break;
+          }
+
+          bool progress = false;
+
+          while (assumed) {
+
+            dbg ("core based approach assumes %d literals", assumed);
+
+            for (int i = 0; i != assumed; i++)
+              solver->assume (core[i]);
+
+            int tmp = solve ();
+            if (tmp == 10) {
+
+              dbg ("all %d negatively assumed backbone candidates "
+                   "can be dropped",
+                   assumed);
+
+              for (int i = 0; i != assumed; i++)
+                drop_candidate (abs (core[i]));
+
+              statistics.failed += assumed;
+
+              assert (INT_MAX - assumed >= idx);
+              filter_candidates (idx);
+              progress = true;
+              assumed = -1;
+              break;
+            }
+
+            assert (tmp == 20);
+
+            int num_failed = 0;
+            int failed_lit = 0;
+            int remain = 0;
+
+            for (int i = 0; i != assumed; i++) {
+              int other = core[i];
+              bool other_failed = solver->failed (other);
+              if (other_failed) {
+                failed_lit = other;
+                num_failed++;
+              }
+              int other_idx = abs (other);
+              assert (candidates[other_idx] == -other);
+              if (!no_fixed && fix_candidate (other_idx)) {
+                progress = true;
+                continue;
+              }
+              if (!other_failed)
+                core[remain++] = other;
+            }
+
+            dbg ("failed literal core of size %d", num_failed);
+            assert (remain < assumed);
+            assert (num_failed);
+
+            if (num_failed == 1 && backbone_variable (abs (failed_lit))) {
+              statistics.failed++;
+              progress = true;
+            }
+
+            assumed = remain;
+            dbg ("reducing core assumptions to complement of size %d",
+                 remain);
+          }
+
+          if (progress) {
+
+            dbg ("continuing with next core");
+
+            if (candidates[idx])
+              goto TRY_SAME_CANDIDATE_AGAIN;
+            else
+              continue;
+          }
+
+          dbg ("falling back to iterative approach");
+        }
+
+        // If not disabled through '--one-by-one' use the 'constrain'
+	// optimization which assumes the disjunction of the negation of all
+	// remaining possible backbone candidate literals.  By default this
+	// uses the 'constrain' API call described in our FMCAD'21 paper
+	// (unless '--no-constrain' is specified in which case we use
+	// activation literals as in 'MiniBones')).
+
+        // If the remaining backbone candidates are all actually backbones
+	// then only one such call can be enough to prove it. Otherwise
+	// without 'constraints' we need as many solver calls as there are
+	// candidates.  Without constrain this puts heavy load on the
+	// 'restore' algorithm which in some instances ended up taking 99%
+	// of the running time.
+
+	// It seems reasonable to limit the size of the constraint (the
+	// number of negated candidate literals where one is assumed to be
+	// flippable) by some sort of chunking.  In contrast to earlier work
+	// in 'MiniBones' we adapt the limit during chunking as follows.  As
+	// long constraint was unsatisfiable (and all the contained
+	// candidates are thus fixed) we increase the limit on the
+	// considered candidates in the constraint exponentially (by the
+	// hard coded factor 10).  If the call returns a model we go back to
+	// checking candidates one-by-one.  If the following call returns
+	// unsatisfiable, we limit the size of the constraint to 10
+	// candidates next time etc.
 
         if (!one_by_one && chunking) {
           if (last == 20)
-            chunk = (chunk < INT_MAX/10) ? 10 * chunk : INT_MAX;
+            constraint_limit = (constraint_limit < INT_MAX / 10)
+                                   ? 10 * constraint_limit
+                                   : INT_MAX;
           else
-            chunk = 1;
+            constraint_limit = 1;
         }
 
         if (!one_by_one && last == 20) {
 
-          assert (chunk > 1);
+          assert (constraint_limit > 1);
           int assumed = 0;
           assert (assumed < vars);
           constraint[assumed++] = -lit;
@@ -1032,70 +1186,67 @@ int main (int argc, char **argv) {
             assert (assumed < vars);
             constraint[assumed++] = -lit_other;
 
-            if (assumed == chunk)
+            if (assumed == constraint_limit)
               break;
           }
 
-          if (assumed > 1) { // At least one other candidate left.
+          if (assumed == 1)
+            goto ASSUME_NEGATION_OF_SINGLE_BACKBONE_CANDIDATE;
 
-            dbg ("assuming negation of %d remaining backbone "
-                 "candidates starting with variable %d",
-                 assumed, idx);
+          dbg ("assuming negation of %d remaining backbone "
+               "candidates starting with variable %d",
+               assumed, idx);
 
-            if (no_constrain) {
-              activation_variable++;
-              dbg ("new activation variable %s", activation_variable);
-              solver->add (activation_variable);
-              for (int i = 0; i != assumed; i++)
-                solver->add (constraint[i]);
-              solver->add (0);
-              solver->assume (-activation_variable);
-            } else {
-              for (int i = 0; i != assumed; i++)
-                solver->constrain (constraint[i]);
-              solver->constrain (0);
-	    }
-
-            last = solve ();
-            if (last == 10) {
-              dbg ("constraining negation of %d backbones candidates "
-                   "starting with variable %d all-at-once produced model",
-                   assumed, idx);
-              int other = drop_first_candidate (idx);
-              filter_candidates (other + 1);
-              try_to_flip_remaining (idx);
-            }
-
-            if (no_constrain) {
-              solver->add (activation_variable);
-              solver->add (0);
-            }
-
-            if (last == 10) {
-
-              lit = candidates[idx];
-              if (lit)
-                goto TRY_SAME_CANDIDATE_AGAIN;
-
-              continue; // ... with next candidate.
-            }
-
-            assert (last == 20);
-            msg ("%d remaining candidates starting at %d "
-                 "shown to be backbones in one call",
-                 assumed, lit);
-            backbone_variables (assumed); // Plural!  So all assumed.
-            continue;
-
+          if (no_constrain) {
+            activation_variable++;
+            dbg ("new activation variable %s", activation_variable);
+            solver->add (activation_variable);
+            for (int i = 0; i != assumed; i++)
+              solver->add (constraint[i]);
+            solver->add (0);
+            solver->assume (-activation_variable);
           } else {
-
-            dbg ("no other literal besides %d "
-                 "remains a backbone candidate",
-                 lit);
-
-            // ... so fall through and continue with assumption below.
+            for (int i = 0; i != assumed; i++)
+              solver->constrain (constraint[i]);
+            solver->constrain (0);
           }
+
+          last = solve ();
+          if (last == 10) {
+            dbg ("constraining negation of %d backbones candidates "
+                 "starting with variable %d all-at-once produced model",
+                 assumed, idx);
+            int other = drop_first_candidate (idx);
+            filter_candidates (other + 1);
+            try_to_flip_remaining (idx);
+          }
+
+          if (no_constrain) {
+            solver->add (activation_variable);
+            solver->add (0);
+          }
+
+          if (last == 10) {
+
+            lit = candidates[idx];
+            if (lit)
+              goto TRY_SAME_CANDIDATE_AGAIN;
+
+            continue; // ... with next candidate.
+          }
+
+          assert (last == 20);
+          msg ("%d remaining candidates starting at %d "
+               "shown to be backbones in one call",
+               assumed, lit);
+          backbone_variables (assumed); // Plural!  So all assumed.
+          continue;
         }
+
+      ASSUME_NEGATION_OF_SINGLE_BACKBONE_CANDIDATE:
+
+        dbg ("no other literal besides %d remains a backbone candidate",
+             lit);
 
         dbg ("assuming negation %d of backbone candidate %d", -lit, lit);
         solver->assume (-lit);
@@ -1166,6 +1317,9 @@ int main (int argc, char **argv) {
       if (!one_by_one)
         delete[] constraint;
 
+      if (cores)
+        delete[] core;
+
       if (checker) {
         if (statistics.checked < (size_t) vars)
           fatal ("checked %zu literals and not all %d variables",
@@ -1175,7 +1329,6 @@ int main (int argc, char **argv) {
                  statistics.checked, vars);
         delete checker;
       }
-
     } else {
       assert (res == 20);
       printf ("s UNSATISFIABLE\n");
