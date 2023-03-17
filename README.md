@@ -27,7 +27,7 @@ p cnf 3 4
 -2 -3 0
 $ cadiback -q dimacs.cnf
 b 1
-b 3
+b -3
 b 0
 s SATISFIABLE
 ```
