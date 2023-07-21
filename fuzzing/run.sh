@@ -22,6 +22,8 @@ do
     [ $o1 = "one-by-one" -a $o2 = "no-constrain" ] && continue
     [ $o1 = "one-by-one" -a $o2 = "chunking" ] && continue
     [ $o1 = "no-flip" -a $o2 = "really-flip" ] && continue
+    [ $o1 = "big-no-els" -a $o2 = "big-roots" ] && continue
+    [ $o1 = "big-roots" -a $o2 = "big-no-els" ] && continue
 
     if [ $o1 = default -a $o2 = default ]
     then
