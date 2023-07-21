@@ -31,6 +31,10 @@ static const char * usage =
 "  --one-by-one       try candidates one-by-one (do not use 'constrain')\n"
 "  --set-phase        force phases to satisfy negation of candidates\n"
 "\n"
+"  --big              search for backbones in the BIG first\n"
+"  --big-no-els       do not apply ELS to the BIG before extracting backbones\n"
+"  --big-roots        only probe the roots of the ELS\n"
+"\n"
 "  --default          set optimization options to the default\n"
 "  --plain            disable all optimizations, which is the same as:\n"
 "\n"
@@ -61,6 +65,9 @@ static const char * usage =
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#include <algorithm>
+#include <numeric>
 
 // Include the main 'CaDiCaL' API from 'cadical.hpp', but also some helper
 // code from its library (from the 'CaDiCaL' source code directory').
@@ -163,11 +170,31 @@ static const char *chunking;
 //
 static const char *cores;
 
+// If this option is enable CadiBack will initially run our algorithm KB3 to
+// search for Backbones that can be identified in the BIG (Binary
+// Implication Graph) alone. This can be useful to find a (sometimes large)
+// subset of backbones early on. If CadiBack is not used in an
+// anytime-context this option usally doesn't yield any benefit, however it
+// also usually doesn't cost much. See our FMCAD'23 paper on Big Backbones
+// for a description of the algorithm and experimental resutls.
+static const char *big;
+
+// Applying ELS (Equivalent literal substitution) turns the BIG into a DAG.
+// This isn't necessary for KB3 but can increase performance.
+static const char *big_no_els;
+
+// KB3 probes individual literals by propagating them in the BIG. To find
+// all Backbones in the BIG it is sufficent to only probe the roots of the
+// BIG. This can however have detrimental effects for KB3 and is disabled by
+// default. This option requires ELS.
+static const char *big_roots;
+
 static int vars;        // The number of variables in the CNF.
 static int *fixed;      // The resulting fixed backbone literals.
 static int *candidates; // The backbone candidates (if non-zero).
 static int *constraint; // Literals to constrain.
 static int *core;       // Remaining core literals.
+static char *marked;    // Flag used for ELS and BIG propagation.
 
 // Here we have the files on which the tool operators. The first file
 // argument is the '<dimacs>' if specified. Otherwise we will use '<stdin>'.
@@ -191,13 +218,14 @@ static CaDiCaL::Solver *solver;
 // Some statistics are collected here.
 
 static struct {
-  size_t backbones; // Number of backbones found.
-  size_t dropped;   // Number of non-backbones found.
-  size_t filtered;  // Number of candidates with two models.
-  size_t checked;   // How often checked model or backbone.
-  size_t fixed;     // Number of fixed variables.
-  size_t failed;    // Failed literals during core based approach.
-  size_t core;      // Set by core based approach.
+  size_t backbones;     // Number of backbones found.
+  size_t dropped;       // Number of non-backbones found.
+  size_t filtered;      // Number of candidates with two models.
+  size_t checked;       // How often checked model or backbone.
+  size_t fixed;         // Number of fixed variables.
+  size_t failed;        // Failed literals during core based approach.
+  size_t core;          // Set by core based approach.
+  size_t big_backbones; // Number of backbones found.
   struct {
     size_t sat;     // Calls with result SAT to SAT solver.
     size_t unsat;   // Calls with result UNSAT to SAT solver.
@@ -214,6 +242,8 @@ static struct {
 
 static double first_time, sat_time, unsat_time, solving_time, unknown_time;
 static double satmax_time, unsatmax_time, flip_time, check_time;
+static double big_search_time, big_read_time, big_els_time, big_check_time,
+    big_extension_time;
 static volatile double *started, start_time;
 
 // Declaring these with '__attribute__ ...' gives nice warnings.
@@ -316,32 +346,36 @@ static void print_statistics () {
   printf ("c --- [ backbone statistics ] ");
   printf ("------------------------------------------------\n");
   printf ("c\n");
-  printf ("c found         %9zu backbones  %3.0f%%\n", statistics.backbones,
-          percent (statistics.backbones, vars));
-  printf ("c dropped       %9zu candidates %3.0f%%\n", statistics.dropped,
-          percent (statistics.dropped, vars));
+  printf ("c found         %9zu backbones     %3.0f%%\n",
+          statistics.backbones, percent (statistics.backbones, vars));
+  printf ("c dropped       %9zu candidates    %3.0f%%\n",
+          statistics.dropped, percent (statistics.dropped, vars));
   printf ("c\n");
-  printf ("c filtered      %9zu candidates %3.0f%%\n", statistics.filtered,
-          percent (statistics.filtered, vars));
+  printf ("c filtered      %9zu candidates    %3.0f%%\n",
+          statistics.filtered, percent (statistics.filtered, vars));
 #ifndef NFLIP
-  printf ("c flippable     %9zu candidates %3.0f%%\n", statistics.flippable,
-          percent (statistics.flippable, vars));
-  printf ("c flipped       %9zu candidates %3.0f%%\n", statistics.flipped,
-          percent (statistics.flipped, vars));
+  printf ("c flippable     %9zu candidates    %3.0f%%\n",
+          statistics.flippable, percent (statistics.flippable, vars));
+  printf ("c flipped       %9zu candidates    %3.0f%%\n",
+          statistics.flipped, percent (statistics.flipped, vars));
 #endif
-  printf ("c fixed         %9zu candidates %3.0f%%\n", statistics.fixed,
+  printf ("c fixed         %9zu candidates    %3.0f%%\n", statistics.fixed,
           percent (statistics.fixed, vars));
-  printf ("c core          %9zu candidates %3.0f%%\n", statistics.core,
+  printf ("c core          %9zu candidates    %3.0f%%\n", statistics.core,
           percent (statistics.core, vars));
-  printf ("c failed        %9zu candidates %3.0f%%\n", statistics.failed,
+  printf ("c found         %9zu big_backbone %3.0f%%\n",
+          statistics.big_backbones,
+          percent (statistics.big_backbones, statistics.backbones));
+  printf ("c failed        %9zu candidates    %3.0f%%\n", statistics.failed,
           percent (statistics.failed, vars));
   printf ("c\n");
-  printf ("c called solver %9zu times      %3.0f%%\n",
+  printf ("c called solver %9zu times         %3.0f%%\n",
           statistics.calls.total,
           percent (statistics.calls.total, vars + 1));
-  printf ("c satisfiable   %9zu times      %3.0f%%\n", statistics.calls.sat,
+  printf ("c satisfiable   %9zu times         %3.0f%%\n",
+          statistics.calls.sat,
           percent (statistics.calls.sat, statistics.calls.total));
-  printf ("c unsatisfiable %9zu times      %3.0f%%\n",
+  printf ("c unsatisfiable %9zu times         %3.0f%%\n",
           statistics.calls.unsat,
           percent (statistics.calls.unsat, statistics.calls.total));
   printf ("c\n");
@@ -372,6 +406,23 @@ static void print_statistics () {
   if (verbosity > 0 || flip_time)
     printf ("c   %10.2f %6.2f %% flip\n", flip_time,
             percent (flip_time, total_time));
+
+  if (big && (verbosity > 0 || big_read_time))
+    printf ("c   %10.2f %6.2f %% big_read\n", big_read_time,
+            percent (big_read_time, total_time));
+  if (big && (verbosity > 0 || big_els_time))
+    printf ("c   %10.2f %6.2f %% big_no_els\n", big_els_time,
+            percent (big_els_time, total_time));
+  if (big && (verbosity > 0 || big_search_time))
+    printf ("c   %10.2f %6.2f %% big_search\n", big_search_time,
+            percent (big_search_time, total_time));
+  if (big && (verbosity > 0 || big_extension_time))
+    printf ("c   %10.2f %6.2f %% big_extension\n", big_extension_time,
+            percent (big_extension_time, total_time));
+  if (big && (verbosity > 0 || big_check_time))
+    printf ("c   %10.2f %6.2f %% big_check\n", big_check_time,
+            percent (big_check_time, total_time));
+
   if (verbosity > 0 || check_time)
     printf ("c   %10.2f %6.2f %% check\n", check_time,
             percent (check_time, total_time));
@@ -726,6 +777,348 @@ static bool looks_like_a_dimacs_file (const char *path) {
          match_until_dot (suffix, "cnf");
 }
 
+int ind (int i) {
+  assert (i);
+  return (abs (i) << 1) - 1 - (i > 0);
+}
+int lit (int i) { return ((i >> 1) + 1) * ((i & 1) ? -1 : 1); }
+int var (int i) { return (i >> 1) + 1; }
+int neg (int i) { return i ^ 1; }
+
+class BigDegreeIterator : public CaDiCaL::ClauseIterator {
+public:
+  int num_edges = 0;
+  std::vector<int> &f;
+  BigDegreeIterator (std::vector<int> &f) : f (f) {}
+  bool clause (const std::vector<int> &c) {
+    if (c.size () != 2)
+      return true;
+    num_edges += 2;
+    ++f[neg (ind (c[0])) + 2];
+    ++f[neg (ind (c[1])) + 2];
+    return true;
+  }
+};
+
+class BigEdgeIterator : public CaDiCaL::ClauseIterator {
+public:
+  std::vector<int> &f, &e;
+  BigEdgeIterator (std::vector<int> &f, std::vector<int> &e)
+      : f (f), e (e) {}
+  bool clause (const std::vector<int> &c) {
+    if (c.size () != 2)
+      return true;
+    const int u = ind (c[0]);
+    const int v = ind (c[1]);
+    e[f[neg (u) + 1]++] = v;
+    e[f[neg (v) + 1]++] = u;
+    return true;
+  }
+};
+
+static void big_extract (int num_nodes, std::vector<int> &f,
+                         std::vector<int> &e) {
+  f.resize (num_nodes + 2);
+  BigDegreeIterator fillF (f);
+  solver->traverse_clauses (fillF);
+  e.resize (fillF.num_edges);
+  for (size_t i = 1; i < f.size (); i++)
+    f[i] += f[i - 1];
+  BigEdgeIterator fillE (f, e);
+  solver->traverse_clauses (fillE);
+  f.pop_back ();
+  assert (f.size () == static_cast<size_t> (num_nodes + 1));
+  msg ("read BIG with %d nodes and %d edges", num_nodes, fillF.num_edges);
+}
+
+static int big_els (std::vector<int> &f, std::vector<int> &e,
+                    std::vector<int> &extension, bool check_only = false) {
+  if (e.empty ())
+    return 0;
+  // tarjan
+  const unsigned INV = UINT_MAX;
+  // using MSB as closed flag
+  const unsigned MSB = 1 << (sizeof (unsigned) * 8 - 1);
+  const int n = f.size () - 1;
+  std::vector<unsigned> rep (n, INV);
+  std::vector<int> work, scc;
+  unsigned i = 0;
+  for (int u = 0; u < n; u++) {
+    if (rep[u] != INV)
+      continue;
+    work = {u};
+    while (work.size () > 0) {
+      int u = work.back ();
+      if (u == static_cast<int> (INV)) {
+        work.pop_back ();
+        int u = work.back ();
+        work.pop_back ();
+        bool closed_scc = true;
+        for (int v = f[u]; v < f[u + 1]; v++) {
+          if (rep[u] > rep[e[v]]) {
+            rep[u] = rep[e[v]];
+            closed_scc = false;
+          }
+        }
+        if (closed_scc) {
+          size_t entry = scc.size () - 1;
+          int min_lit = scc[entry];
+          while (scc[entry] != u) {
+            entry--;
+            min_lit = std::min (min_lit, scc[entry]);
+          }
+          assert (scc[entry] == u);
+          for (size_t i = entry; i < scc.size (); ++i) {
+            int v = scc[i];
+            if (neg (min_lit) == v)
+              return 20; // unsatisfiable
+            assert (rep[v] < MSB);
+            rep[v] = min_lit | MSB;
+          }
+          scc.resize (entry);
+          assert (scc.size () == 0 or scc.back () != u);
+        }
+      } else if (rep[u] == INV) {
+        scc.push_back (u);
+        rep[u] = i++;
+        work.push_back (INV);
+        for (int v = f[u]; v < f[u + 1]; v++) {
+          if (rep[e[v]] == INV) {
+            work.push_back (e[v]);
+          }
+        }
+      } else {
+        work.pop_back ();
+      }
+    }
+    assert (scc.size () == 0);
+  }
+  std::transform (rep.begin (), rep.end (), rep.begin (),
+                  [] (int x) { return x ^ MSB; });
+  assert (std::all_of (rep.begin (), rep.end (),
+                       [] (unsigned n) { return n < MSB; }));
+
+  if (check_only)
+    return 0;
+  // sort (stable) node indices by their rep
+  std::vector<int> sccs (n);
+  std::iota (sccs.begin (), sccs.end (), 0);
+  std::stable_sort (sccs.begin (), sccs.end (),
+                    [&] (int a, int b) { return rep[a] < rep[b]; });
+
+  // substitute
+  int r = -1, u_prime = -1, l = 0;
+  std::vector<int> f_prime (n + 1), e_prime, edges;
+  e_prime.reserve (n);
+  for (int u : sccs) {
+    int r_prime = rep[u];
+    if (r_prime != r) {
+      if (l) {
+        l = 0;
+        extension.push_back (-1);
+      } else if (r != -1)
+        extension.pop_back ();
+      r = r_prime;
+      for (int v : edges) {
+        marked[v] = false;
+        e_prime.push_back (v);
+      }
+      assert (static_cast<size_t> (u_prime + 1) < f_prime.size ());
+      f_prime.at (u_prime + 1) = edges.size (); // needs prefix sum
+      edges.clear ();
+      u_prime = r;
+    } else
+      l++;
+    extension.push_back (u);
+    assert (static_cast<int> (rep[u]) == r);
+
+    for (int i = f[u]; i < f[u + 1]; ++i) {
+      const int v = rep[e[i]];
+      if (v == r)
+        continue;
+      if (!marked[v]) {
+        edges.push_back (v);
+        marked[v] = true;
+      }
+    }
+  }
+  if (l) {
+    l = 0;
+    extension.push_back (-1);
+  } else
+    extension.pop_back ();
+  if (edges.size ()) {
+    for (int v : edges) {
+      marked[v] = false;
+      e_prime.push_back (v);
+    }
+    f_prime[u_prime + 1] = edges.size (); // needs prefix sum
+    edges.clear ();
+  }
+
+  for (size_t i = 1; i < f_prime.size (); i++)
+    f_prime[i] += f_prime[i - 1];
+
+  assert (f_prime.size () == static_cast<size_t> (n + 1));
+  assert (e_prime.size () == static_cast<size_t> (f_prime.back ()));
+
+  f = std::move (f_prime);
+  e = std::move (e_prime);
+  return 0;
+}
+
+static bool big_backbone_node (int node) {
+  int literal = lit (node);
+  int idx = var (node);
+  if (!literal)
+    return false;
+  fixed[idx] = literal;
+  if (!no_print) {
+    fprintf (files.backbone.file, "b %d\n", literal);
+    fflush (files.backbone.file);
+  }
+  solver->add (literal);
+  solver->add (0);
+  assert (statistics.backbones < (size_t) vars);
+  statistics.backbones++;
+  statistics.big_backbones++;
+  return true;
+}
+
+static void big_backbone_base (const std::vector<int> &f,
+                               const std::vector<int> &e) {
+  msg ("BIG base searching for backbones after %.2f seconds", time ());
+  const int n = f.size () - 1;
+  for (int c = 0; c < n; ++c) {
+    if (fixed[var (c)])
+      continue;
+    marked[c] = true;
+    std::vector<int> tree{c};
+    size_t i = 0;
+    while (i < tree.size ()) {
+      const int u = tree[i++];
+      for (int j = f[u]; j < f[u + 1]; ++j) {
+        const int v = e[j];
+        if (marked[v])
+          continue;
+        if (marked[neg (v)]) {
+          big_backbone_node (neg (c));
+          i = tree.size ();
+          break;
+        }
+        marked[v] = true;
+        tree.push_back (v);
+      }
+    }
+    for (size_t i = 0; i < tree.size (); ++i)
+      marked[tree[i]] = false;
+  }
+}
+
+static bool big_propagate (const std::vector<int> &f,
+                           const std::vector<int> &e,
+                           std::vector<int> &tree, int root) {
+  size_t i = tree.size ();
+  marked[root] = true;
+  tree.push_back (root);
+  while (i < tree.size ()) {
+    const int u = tree[i++];
+    assert (marked[u]);
+    for (int j = f[u]; j < f[u + 1]; ++j) {
+      int v = e[j];
+      if (marked[v])
+        continue;
+      assert (!fixed[var (v)]);
+      if (marked[neg (v)])
+        return true;
+      marked[v] = true;
+      tree.push_back (v);
+    }
+  }
+  return false;
+}
+
+template <bool big_roots>
+static void big_backbone (const std::vector<int> &f,
+                          const std::vector<int> &e) {
+  msg ("BIG searching for backbones after %.2f seconds", time ());
+  const int n = f.size () - 1;
+  std::vector<int> candidates, tree, new_candidates, backbones;
+  if (big_roots) {
+    for (int u = 0; u < n - 1; u += 2) {
+      const bool out = f[u + 1] > f[u];
+      const bool in = f[u + 2] > f[u + 1];
+      if (out ^ in)
+        candidates.push_back (out ? u : neg (u));
+    }
+  } else {
+    candidates.resize (n);
+    std::iota (candidates.begin (), candidates.end (), 0);
+  }
+  msg ("BIG found %ld initial candidates", candidates.size ());
+  assert (backbones.empty ());
+  while (candidates.size ()) {
+    const auto end = candidates.end ();
+    auto j = candidates.begin ();
+    for (auto i = j; i != end; i++) {
+      const int save_tree = tree.size ();
+      int c = *i;
+      if (fixed[var (c)] || marked[c])
+        continue;
+      if (marked[neg (c)]) {
+        *j++ = c; // delay candidate
+        continue;
+      }
+      const bool conflict = big_propagate (f, e, tree, c);
+      if (conflict) { // partial backtrack
+        for (size_t i = save_tree; i < tree.size (); ++i)
+          marked[tree[i]] = false;
+        tree.resize (save_tree);
+        const int backbone = neg (c);
+        big_backbone_node (backbone);
+        backbones.push_back (backbone);
+        marked[backbone] = true;
+        { // propagate backbone
+          std::vector<int> q{backbone};
+          int i = 0;
+          while (static_cast<size_t> (i) < q.size ()) {
+            const int u = q[i++];
+            if (big_roots) {
+              for (int i = f[neg (u)]; i < f[neg (u) + 1]; i++) {
+                int v = e[i];
+                new_candidates.push_back (v);
+              }
+            }
+            for (int j = f[u]; j < f[u + 1]; ++j) {
+              const int v = e[j];
+              if (fixed[var (v)])
+                continue;
+              big_backbone_node (v);
+              backbones.push_back (v);
+              marked[v] = true;
+              q.push_back (v);
+            }
+          }
+        }
+      }
+    }
+    candidates.resize (j - candidates.begin ());
+    if (big_roots) {
+      candidates.insert (candidates.end (), new_candidates.begin (),
+                         new_candidates.end ());
+      new_candidates.clear ();
+    }
+    if (candidates.empty ())
+      break;
+    for (int u : tree)
+      marked[u] = false;
+    for (int u : backbones)
+      marked[u] = true;
+    backbones.clear ();
+    tree.clear ();
+  }
+}
+
 int main (int argc, char **argv) {
 
   for (int i = 1; i != argc; i++) {
@@ -785,6 +1178,16 @@ int main (int argc, char **argv) {
       chunking = arg;
     } else if (!strcmp (arg, "--set-phase")) {
       set_phase = true;
+    } else if (!strcmp (arg, "--big")) {
+      big = arg;
+    } else if (!strcmp (arg, "--big-no-els")) {
+      big_no_els = arg;
+      if (!big)
+        big = arg;
+    } else if (!strcmp (arg, "--big-roots")) {
+      big_roots = arg;
+      if (!big)
+        big = arg;
     } else if (!strcmp (arg, "--default")) {
       no_filter = no_fixed = no_inprocessing = one_by_one = 0;
 #ifndef NFLIP
@@ -828,6 +1231,10 @@ int main (int argc, char **argv) {
     die ("'%s' does not make sense in combination with '%s'", really_flip,
          no_flip);
 #endif
+
+  if (big_no_els && big_roots)
+    die ("'%s' does not make sense in combination with '%s'", big_no_els,
+         big_roots);
 
   msg ("CadiBack BackBone Extractor");
   msg ("Copyright (c) 2023 Armin Biere University of Freiburg");
@@ -915,7 +1322,7 @@ int main (int argc, char **argv) {
   if (report || verbosity > 1)
     solver->set ("report", 1);
 
-  int res;
+  int res = 0;
   {
     CadiBackSignalHandler handler;
     CaDiCaL::Signal::set (&handler);
@@ -942,6 +1349,99 @@ int main (int argc, char **argv) {
     }
     msg ("found %d variables", vars);
 
+    if (big) {
+      msg ("starting BIG search after %.2f seconds", time ());
+      std::vector<int> f, e;
+      const int num_nodes = 2 * vars;
+      start_timer (&big_read_time);
+      big_extract (num_nodes, f, e);
+      marked = new char[num_nodes];
+      if (!marked)
+        fatal ("out-of-memory allocating marked flag for BIG nodes");
+      for (int u = 0; u < num_nodes; u++)
+        marked[u] = false;
+      stop_timer ();
+
+      // Keeps track of the ELS groups.
+      // If the representative of a group of literals is found to be a
+      // backbone all literals in the group need to be marked as a backbone.
+      std::vector<int> extension;
+      start_timer (&big_els_time);
+      if (!big_no_els)
+        res = big_els (f, e, extension);
+      stop_timer ();
+
+      if (res) {
+        assert (res == 20);
+        msg ("Unsatisfiability determined by ELS");
+        printf ("s UNSATISFIABLE\n");
+        if (files.backbone.close)
+          fclose (files.backbone.file);
+        print_statistics ();
+        if (check)
+          assert (solve () == 20);
+        dbg ("deleting solver");
+        CaDiCaL::Signal::reset ();
+        delete solver;
+        line ();
+        msg ("exit %d", res);
+        return res;
+      }
+
+      fixed = new int[vars + 1];
+      if (!fixed)
+        fatal ("out-of-memory allocating backbone result array");
+      for (int idx = 1; idx <= vars; idx++)
+        fixed[idx] = 0;
+
+      start_timer (&big_search_time);
+      if (big_roots)
+        big_backbone<true> (f, e);
+      else
+        big_backbone<false> (f, e);
+      stop_timer ();
+      if (check) {
+        start_timer (&big_check_time);
+        std::vector<int> backbone, backbone_base, dummy;
+        if (!big_no_els || !big_els (f, e, dummy, true)) {
+          for (int idx = 1; idx <= vars; idx++) {
+            if (fixed[idx])
+              backbone.push_back (fixed[idx]);
+            fixed[idx] = 0;
+          }
+          for (size_t u = 0; u < f.size () - 1; u++)
+            marked[u] = false;
+          statistics.backbones = 0, statistics.big_backbones = 0;
+          big_backbone_base (f, e);
+          for (int idx = 1; idx <= vars; idx++)
+            if (fixed[idx])
+              backbone_base.push_back (fixed[idx]);
+          assert (backbone == backbone_base);
+        }
+        stop_timer ();
+      }
+
+      // extending backbones to their scc
+      start_timer (&big_extension_time);
+      int fixed_val = 0;
+      for (int u : extension) {
+        if (u == -1)
+          fixed_val = 0;
+        else if (fixed_val)
+          big_backbone_node (u);
+        else {
+          const int val = fixed[var (u)];
+          if (val == lit (u))
+            fixed_val = val;
+        }
+      }
+      stop_timer ();
+
+      msg ("BIG found %ld backbones after %.2f seconds",
+           statistics.big_backbones, time ());
+      delete[] marked;
+    }
+
     // Determine first model or that formula is unsatisfiable.
 
     line ();
@@ -964,9 +1464,11 @@ int main (int argc, char **argv) {
       if (!candidates)
         fatal ("out-of-memory allocating backbone candidate array");
 
-      fixed = new int[vars + 1];
-      if (!fixed)
-        fatal ("out-of-memory allocating backbone result array");
+      if (!big) {
+        fixed = new int[vars + 1];
+        if (!fixed)
+          fatal ("out-of-memory allocating backbone result array");
+      }
 
       if (!one_by_one) {
         constraint = new int[vars];
@@ -985,9 +1487,13 @@ int main (int argc, char **argv) {
       for (int idx = 1; idx <= vars; idx++) {
         int lit = solver->val (idx) < 0 ? -idx : idx; // Legacy support.
         assert (lit == idx || lit == -idx);
-        candidates[idx] = lit;
-        fixed[idx] = 0;
-
+        if (!big) {
+          candidates[idx] = lit;
+          fixed[idx] = 0;
+        } else if (fixed[idx])
+          candidates[idx] = 0;
+        else
+          candidates[idx] = lit;
         // If enabled by '--set-phase' set opposite value as default
         // decision phase.  This seems to have  negative effects with and
         // without using 'constrain' and thus is disabled by default.

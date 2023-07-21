@@ -9,8 +9,7 @@ usage: configure [-h|--help][-g|--debug][--no-flip]
 
   -h | --help   print this command line option summary
 
-  -g | --debug  print with assertion checking and symbols
-                (cheap as the main work is done in the SAT solver)
+  -g | --debug  build with assertion checking and symbols
 
   --no-flip     disable flipping with '-DNFLIP' at compile-time
                 (to support old legacy versions of 'CaDiCaL')
