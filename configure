@@ -70,7 +70,7 @@ fi
 
 if [ x"$CXX" = x ]
 then
-  COMPILE="g++ -Wall"
+  COMPILE="g++ -Wall -std=c++11"
 else
   COMPILE="$CXX -W"
 fi
